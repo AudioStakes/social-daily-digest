@@ -1,6 +1,6 @@
 # social-daily-digest
 
-`social-daily-digest` is a **macOS-only local CLI** that checks X and Facebook once per day, writes a Markdown digest report, and can optionally email that report to your own iCloud address.
+`social-daily-digest` is a **macOS-only local CLI** that checks X once per day, writes a Markdown digest report, and can optionally email that report to your own iCloud address.
 
 The tool is intentionally scoped for a single local user with macOS-native integrations (`security`, `osascript`, `open`, `launchctl`) and Google Chrome profile reuse.
 
@@ -9,7 +9,7 @@ The tool is intentionally scoped for a single local user with macOS-native integ
 ### In scope
 
 - Local-only execution on macOS.
-- Crawling X and Facebook with Playwright using local Google Chrome.
+- Crawling X with Playwright using local Google Chrome.
 - Manual-first login with session reuse via an existing local Google Chrome profile (or an optional dedicated profile).
 - Optional storage of platform credentials in macOS Keychain for future compatibility.
 - Generating a daily Markdown report at `reports/YYYY-MM-DD.md`.
@@ -68,14 +68,11 @@ email:
 
 x:
   account_name: ""
-
-facebook:
-  account_name: ""
 ```
 
-`sns-digest init` lists local Chrome profiles (`Default`, `Profile 1`, etc.) and lets you choose one. Selecting an existing profile allows reuse of already logged-in X/Facebook sessions. A dedicated `browser_profiles/chrome` option remains available as a safer fallback.
+`sns-digest init` lists local Chrome profiles (`Default`, `Profile 1`, etc.) and lets you choose one. Selecting an existing profile allows reuse of already logged-in X sessions. A dedicated `browser_profiles/chrome` option remains available as a safer fallback.
 
-If the selected profile is already open in normal Google Chrome, close Chrome and re-run `sns-digest run` (or switch to the dedicated profile).
+If the selected profile is already open in normal Google Chrome, `sns-digest run` creates a persistent social-daily-digest mirror of that profile under `browser_profiles/managed/` and launches Chrome from the mirror. That means you can complete login once in the `sns-digest` window and reuse that session on later runs without touching the live Chrome profile.
 
 ### Email setting behavior
 
@@ -96,13 +93,12 @@ email:
 
 ### SNS credentials
 
-X and Facebook login is handled manually inside the opened Google Chrome window.
+X login is handled manually inside the opened Google Chrome window.
 
-You can still store X / Facebook passwords in macOS Keychain as **optional / reserved for future compatibility**, but the crawler does **not** auto-type these values into login forms:
+You can still store an X password in macOS Keychain as **optional / reserved for future compatibility**, but the crawler does **not** auto-type this value into login forms:
 
 ```bash
 sns-digest credentials set x
-sns-digest credentials set facebook
 ```
 
 ### Email credential (Apple app-specific password)
@@ -130,10 +126,8 @@ sns-digest email credentials set
 ```text
 sns-digest init
 sns-digest credentials set x
-sns-digest credentials set facebook
 sns-digest credentials show
 sns-digest credentials delete x
-sns-digest credentials delete facebook
 sns-digest email credentials set
 sns-digest email credentials show
 sns-digest email credentials delete
@@ -161,12 +155,12 @@ sns-digest schedule show
 
 ## Runtime behavior (`sns-digest run`)
 
-1. Open configured platforms (X/Facebook) in the configured Chrome profile from `config/settings.yaml`.
+1. Open X in the configured Chrome profile from `config/settings.yaml`.
 2. Reuse any existing logged-in session from that chosen profile.
-3. If a platform is logged out, show a macOS dialog asking for manual login in the opened Chrome window.
+3. If X is logged out, show a macOS dialog asking for manual login in the opened Chrome window.
 4. After you click **OK**, navigate again to the platform home/feed and verify login state.
 5. Continue crawling only when login is confirmed; otherwise fail with a clear manual-login-required error.
-6. Crawl configured platforms (X/Facebook).
+6. Crawl X.
 7. Generate `reports/YYYY-MM-DD.md`.
 8. If `email.address` is set, send the report by email with subject `[Social Daily Digest] YYYY-MM-DD` and plain-text body equal to the Markdown report content.
 9. Show the existing macOS completion dialog.

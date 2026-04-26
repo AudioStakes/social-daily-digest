@@ -29,6 +29,10 @@ export function getChromeProfilePath(): string {
   return path.join(getBrowserProfileRoot(), "chrome");
 }
 
+export function getManagedChromeProfilesRoot(): string {
+  return path.join(getBrowserProfileRoot(), "managed");
+}
+
 export function getChromeUserDataDir(): string {
   return path.join(
     os.homedir(),
@@ -41,6 +45,10 @@ export function getChromeUserDataDir(): string {
 
 export function getDataDirectory(): string {
   return path.join(getProjectRoot(), "data");
+}
+
+export function getXSnapshotsDirectory(): string {
+  return path.join(getDataDirectory(), "x_snapshots");
 }
 
 export function getLogsDirectory(): string {

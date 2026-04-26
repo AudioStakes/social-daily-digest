@@ -2,9 +2,8 @@
 
 ## Product Goal
 
-Avoid manually opening noisy social feeds. The Mac should check X and Facebook
-once per day, generate a local Markdown digest, and let the user choose whether
-to view it.
+Avoid manually opening noisy social feeds. The Mac should check X once per day,
+generate a local Markdown digest, and let the user choose whether to view it.
 
 ## MVP Capabilities
 

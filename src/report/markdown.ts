@@ -1,13 +1,9 @@
 import path from "node:path";
 
 import { getReportsDirectory } from "../paths.js";
-import type { AppSettings, PlatformName, SocialPost } from "../types.js";
+import type { AppSettings, SocialPost } from "../types.js";
 import { ensureDirectory, writeTextFile } from "../util/files.js";
-import { formatDateInTimeZone } from "../util/time.js";
-
-function renderPlatformLabel(platform: PlatformName): string {
-  return platform === "x" ? "X" : "Facebook";
-}
+import { formatDateInTimeZone, formatDateTimeInTimeZone } from "../util/time.js";
 
 function indentLines(value: string): string {
   return value
@@ -18,6 +14,50 @@ function indentLines(value: string): string {
 
 function escapeMarkdownText(value: string): string {
   return value.replaceAll("\r", "").trim();
+}
+
+function buildPostMeta(post: SocialPost, timeZone: string): string {
+  const parts: string[] = [];
+
+  if (post.publishedAtMs !== null) {
+    parts.push(formatDateTimeInTimeZone(new Date(post.publishedAtMs), timeZone));
+  } else {
+    parts.push(post.publishedAtLabel);
+  }
+
+  if (post.isRepost) {
+    parts.push("REPOST");
+  }
+
+  if (post.repostedAccount) {
+    parts.push(`of @${post.repostedAccount}`);
+  }
+
+  if (post.hasImage) {
+    parts.push("IMAGE");
+  }
+
+  if (post.hasVideo) {
+    parts.push("VIDEO");
+  }
+
+  return parts.join(" | ");
+}
+
+function buildAuthorLabel(post: SocialPost): string {
+  if (post.authorHandle) {
+    return `${post.author} @${post.authorHandle}`;
+  }
+
+  return post.author;
+}
+
+function buildDayLabel(post: SocialPost, timeZone: string): string {
+  if (post.publishedAtMs === null) {
+    return "Unknown day";
+  }
+
+  return formatDateTimeInTimeZone(new Date(post.publishedAtMs), timeZone).slice(0, 4);
 }
 
 export async function writeMarkdownReport(
@@ -38,36 +78,36 @@ export async function writeMarkdownReport(
     return reportPath;
   }
 
-  const xPosts = posts.filter((post) => post.platform === "x");
-  const facebookPosts = posts.filter((post) => post.platform === "facebook");
+  contents += `\n## Summary\n\n* X: ${posts.length} posts\n`;
 
-  contents += `\n## Summary\n\n* X: ${xPosts.length} posts\n* Facebook: ${facebookPosts.length} posts\n`;
+  contents += `\n## X\n`;
+  const grouped = new Map<string, SocialPost[]>();
 
-  const sections: PlatformName[] = ["x", "facebook"];
-  for (const platform of sections) {
-    const platformPosts = posts.filter((post) => post.platform === platform);
-    if (platformPosts.length === 0) {
-      continue;
-    }
+  for (const post of posts) {
+    const current = grouped.get(buildAuthorLabel(post)) ?? [];
+    current.push(post);
+    grouped.set(buildAuthorLabel(post), current);
+  }
 
-    contents += `\n## ${renderPlatformLabel(platform)}\n`;
-    const grouped = new Map<string, SocialPost[]>();
+  for (const [author, authorPosts] of grouped) {
+    contents += `\n### ${escapeMarkdownText(author)}\n\n`;
 
-    for (const post of platformPosts) {
-      const current = grouped.get(post.author) ?? [];
-      current.push(post);
-      grouped.set(post.author, current);
-    }
-
-    for (const [author, authorPosts] of grouped) {
-      contents += `\n### ${escapeMarkdownText(author)}\n\n`;
-
-      for (const post of authorPosts) {
-        const body = escapeMarkdownText(post.text);
-        contents += `* ${post.publishedAtLabel}\n`;
-        contents += `${indentLines(body)}\n`;
-        contents += `${indentLines(`[${post.url}](${post.url})`)}\n`;
+    let currentDay = "";
+    for (const post of authorPosts) {
+      const dayLabel = buildDayLabel(post, settings.app.timezone);
+      if (dayLabel !== currentDay) {
+        currentDay = dayLabel;
+        contents += `\n#### ${dayLabel}\n\n`;
       }
+
+      contents += `* ${buildPostMeta(post, settings.app.timezone)}\n`;
+      if (!post.isRepost) {
+        const body = escapeMarkdownText(post.text);
+        if (body !== "") {
+          contents += `${indentLines(body)}\n`;
+        }
+      }
+      contents += `${indentLines(`[link](${post.url})`)}\n`;
     }
   }
 

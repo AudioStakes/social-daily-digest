@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "macOS-only local CLI that crawls X and Facebook and generates a daily Markdown digest",
+  "description": "macOS-only local CLI that crawls X and generates a daily Markdown digest",
   "bin": {
     "sns-digest": "dist/main.js"
   },
@@ -14,7 +14,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^8.0.6",
     "playwright-core": "^1.54.2",
     "yaml": "^2.8.1"
   },

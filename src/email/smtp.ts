@@ -52,8 +52,12 @@ async function sendIcloudMail(params: {
       subject: params.subject,
       text: params.body,
     });
-  } catch {
-    throw new CliError(params.errorMessage);
+  } catch (error) {
+    const details =
+      error instanceof Error && error.message.trim() !== ""
+        ? error.message.trim()
+        : "Unknown SMTP error.";
+    throw new CliError(`${params.errorMessage} ${details}`);
   }
 }
 

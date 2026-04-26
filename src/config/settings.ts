@@ -5,10 +5,12 @@ import { CliError } from "../errors.js";
 import {
   getBrowserProfileRoot,
   getChromeProfilePath,
+  getManagedChromeProfilesRoot,
   getConfigDirectory,
   getConfigExamplePath,
   getConfigPath,
   getDataDirectory,
+  getXSnapshotsDirectory,
   getLogsDirectory,
   getReportsDirectory,
 } from "../paths.js";
@@ -26,9 +28,6 @@ email:
   address: ""
 
 x:
-  account_name: ""
-
-facebook:
   account_name: ""
 `;
 
@@ -92,7 +91,6 @@ function validateSettings(value: unknown): AppSettings {
           }
         : null,
     x: normalizePlatformConfig(data.x),
-    facebook: normalizePlatformConfig(data.facebook),
   };
 }
 
@@ -100,7 +98,9 @@ export async function ensureRuntimeDirectories(): Promise<void> {
   await ensureDirectory(getConfigDirectory());
   await ensureDirectory(getBrowserProfileRoot());
   await ensureDirectory(getChromeProfilePath());
+  await ensureDirectory(getManagedChromeProfilesRoot());
   await ensureDirectory(getDataDirectory());
+  await ensureDirectory(getXSnapshotsDirectory());
   await ensureDirectory(getLogsDirectory());
   await ensureDirectory(getReportsDirectory());
 }
@@ -141,10 +141,6 @@ export function getConfiguredPlatforms(settings: AppSettings): PlatformName[] {
 
   if (settings.x.account_name !== "") {
     platforms.push("x");
-  }
-
-  if (settings.facebook.account_name !== "") {
-    platforms.push("facebook");
   }
 
   return platforms;

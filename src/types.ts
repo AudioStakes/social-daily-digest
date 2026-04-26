@@ -1,4 +1,4 @@
-export type PlatformName = "x" | "facebook";
+export type PlatformName = "x";
 
 export interface PlatformConfig {
   account_name: string;
@@ -19,14 +19,19 @@ export interface AppSettings {
     address: string;
   };
   x: PlatformConfig;
-  facebook: PlatformConfig;
 }
 
 export interface SocialPost {
   platform: PlatformName;
   author: string;
+  authorHandle: string | null;
   text: string;
   url: string;
   publishedAtLabel: string;
   publishedAtMs: number | null;
+  isRepost: boolean;
+  repostedAccount: string | null;
+  hasImage: boolean;
+  hasVideo: boolean;
+  articleHtml?: string;
 }

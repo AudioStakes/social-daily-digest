@@ -21,11 +21,9 @@ import {
 import {
   ensureRuntimeDirectories,
   getAccountName,
-  getConfiguredPlatforms,
   initializeWorkspace,
   loadSettings,
 } from "./config/settings.js";
-import { crawlFacebookFeed } from "./crawler/facebook.js";
 import { crawlXFeed } from "./crawler/x.js";
 import {
   deleteEmailCredential,
@@ -40,10 +38,6 @@ import {
 } from "./email/smtp.js";
 import { CliError, ManualActionRequiredError } from "./errors.js";
 import { promptHidden } from "./macos/prompt.js";
-import {
-  openReportInTerminal,
-  showCompletionDialog,
-} from "./macos/terminal.js";
 import { getChromeProfilePath, getChromeUserDataDir } from "./paths.js";
 import { writeMarkdownReport } from "./report/markdown.js";
 import { getScheduleStatus, installSchedule, uninstallSchedule } from "./schedule/launchd.js";
@@ -55,10 +49,8 @@ function printUsage(): void {
 Commands:
   sns-digest init
   sns-digest credentials set x
-  sns-digest credentials set facebook
   sns-digest credentials show
   sns-digest credentials delete x
-  sns-digest credentials delete facebook
   sns-digest email credentials set
   sns-digest email credentials show
   sns-digest email credentials delete
@@ -72,11 +64,11 @@ Commands:
 }
 
 function parsePlatform(value: string | undefined): PlatformName {
-  if (value === "x" || value === "facebook") {
+  if (value === "x") {
     return value;
   }
 
-  throw new CliError(`Unknown platform "${value ?? ""}". Use "x" or "facebook".`);
+  throw new CliError(`Unknown platform "${value ?? ""}". Use "x".`);
 }
 
 async function runInit(): Promise<void> {
@@ -187,12 +179,8 @@ async function runCredentialShow(): Promise<void> {
   const xConfigured =
     settings.x.account_name !== "" &&
     (await hasCredential("x", settings.x.account_name));
-  const facebookConfigured =
-    settings.facebook.account_name !== "" &&
-    (await hasCredential("facebook", settings.facebook.account_name));
 
   console.log(`X: ${xConfigured ? "configured" : "not configured"}`);
-  console.log(`Facebook: ${facebookConfigured ? "configured" : "not configured"}`);
 }
 
 async function runCredentialDelete(platform: PlatformName): Promise<void> {
@@ -267,26 +255,13 @@ async function runEmailTest(): Promise<void> {
   console.log("Test email sent.");
 }
 
-async function crawlPlatform(
-  page: Page,
-  platform: PlatformName,
-  cutoffMs: number,
-): Promise<SocialPost[]> {
-  if (platform === "x") {
-    return await crawlXFeed(page, cutoffMs);
-  }
-
-  return await crawlFacebookFeed(page, cutoffMs);
-}
-
 async function runCrawler(): Promise<void> {
   await ensureRuntimeDirectories();
   const settings = await loadSettings();
-  const enabledPlatforms = getConfiguredPlatforms(settings);
 
-  if (enabledPlatforms.length === 0) {
+  if (settings.x.account_name === "") {
     throw new CliError(
-      'No platforms are configured. Set "x.account_name" and/or "facebook.account_name" in config/settings.yaml.',
+      'X is not configured. Set "x.account_name" in config/settings.yaml.',
     );
   }
 
@@ -302,6 +277,9 @@ async function runCrawler(): Promise<void> {
     } else {
       await assertConfiguredProfileExists(settings);
       console.log(`Using Chrome profile: ${launchConfig.profileDirectory}`);
+      console.log(
+        "Using a persistent social-daily-digest mirror of the selected Chrome profile.",
+      );
     }
 
     context = await launchChrome(
@@ -309,18 +287,14 @@ async function runCrawler(): Promise<void> {
       launchConfig.profileDirectory,
     );
 
-    for (const platform of enabledPlatforms) {
-      console.log(`Checking ${platform}...`);
-      const page: Page = await context.newPage();
-      try {
-        const platformPosts = await crawlPlatform(page, platform, cutoffMs);
-        console.log(`Collected ${platformPosts.length} ${platform} posts.`);
-        posts.push(...platformPosts);
-      } catch (error) {
-        throw error;
-      } finally {
-        await page.close();
-      }
+    console.log("Checking x...");
+    const page: Page = await context.newPage();
+    try {
+      const xPosts = await crawlXFeed(page, cutoffMs);
+      console.log(`Collected ${xPosts.length} x posts.`);
+      posts.push(...xPosts);
+    } finally {
+      await page.close();
     }
   } finally {
     if (context) {
@@ -335,11 +309,6 @@ async function runCrawler(): Promise<void> {
     const reportDate = path.basename(reportPath, ".md");
     await sendDigestReportEmail(settings, reportPath, reportDate);
     console.log("Digest email sent.");
-  }
-
-  const shouldView = await showCompletionDialog();
-  if (shouldView) {
-    await openReportInTerminal(reportPath);
   }
 }
 
