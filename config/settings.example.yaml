@@ -1,0 +1,11 @@
+app:
+  timezone: Asia/Tokyo
+
+schedule:
+  notify_at: "08:00"
+
+x:
+  account_name: ""
+
+facebook:
+  account_name: ""

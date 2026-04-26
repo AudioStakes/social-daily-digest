@@ -1,0 +1,8 @@
+node_modules/
+dist/
+config/settings.yaml
+browser_profiles/
+data/
+logs/
+reports/
+.DS_Store
