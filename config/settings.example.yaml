@@ -4,6 +4,15 @@ app:
 schedule:
   notify_at: "08:00"
 
+email:
+  enabled: false
+  host: "smtp.gmail.com"
+  port: 587
+  secure: false
+  from: ""
+  to: ""
+  username: ""
+
 x:
   account_name: ""
 

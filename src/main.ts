@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import path from "node:path";
+
 import type { BrowserContext, Page } from "playwright-core";
 
 import {
@@ -18,6 +20,16 @@ import {
 } from "./config/settings.js";
 import { crawlFacebookFeed } from "./crawler/facebook.js";
 import { crawlXFeed } from "./crawler/x.js";
+import {
+  deleteEmailCredential,
+  hasEmailCredential,
+  setEmailCredential,
+} from "./email/keychain.js";
+import {
+  resolveEmailAccountName,
+  sendDigestReportEmail,
+  sendTestEmail,
+} from "./email/smtp.js";
 import { CliError, ManualActionRequiredError } from "./errors.js";
 import { promptHidden } from "./macos/prompt.js";
 import {
@@ -40,6 +52,10 @@ Commands:
   sns-digest credentials show
   sns-digest credentials delete x
   sns-digest credentials delete facebook
+  sns-digest email credentials set
+  sns-digest email credentials show
+  sns-digest email credentials delete
+  sns-digest email test
   sns-digest run
   sns-digest schedule install
   sns-digest schedule uninstall
@@ -112,6 +128,60 @@ async function runCredentialDelete(platform: PlatformName): Promise<void> {
       ? `${platform} credential deleted from macOS Keychain.`
       : `${platform} credential was not present in macOS Keychain.`,
   );
+}
+
+async function runEmailCredentialSet(): Promise<void> {
+  const settings = await loadSettings();
+  const accountName = resolveEmailAccountName(settings);
+  if (accountName === "") {
+    throw new CliError(
+      'Set email.username or email.from in config/settings.yaml before storing email credentials.',
+    );
+  }
+
+  const password = await promptHidden("SMTP password: ");
+  if (password.trim() === "") {
+    throw new CliError("Password cannot be empty.");
+  }
+
+  await setEmailCredential(accountName, password);
+  console.log("Email credential stored in macOS Keychain.");
+}
+
+async function runEmailCredentialShow(): Promise<void> {
+  const settings = await loadSettings();
+  const accountName = resolveEmailAccountName(settings);
+
+  if (accountName === "") {
+    console.log("Email: not configured (set email.username or email.from)");
+    return;
+  }
+
+  const configured = await hasEmailCredential(accountName);
+  console.log(`Email: ${configured ? "configured" : "not configured"}`);
+}
+
+async function runEmailCredentialDelete(): Promise<void> {
+  const settings = await loadSettings();
+  const accountName = resolveEmailAccountName(settings);
+  if (accountName === "") {
+    throw new CliError(
+      'Set email.username or email.from in config/settings.yaml before deleting email credentials.',
+    );
+  }
+
+  const deleted = await deleteEmailCredential(accountName);
+  console.log(
+    deleted
+      ? "Email credential deleted from macOS Keychain."
+      : "Email credential was not present in macOS Keychain.",
+  );
+}
+
+async function runEmailTest(): Promise<void> {
+  const settings = await loadSettings();
+  await sendTestEmail(settings);
+  console.log("Test email sent.");
 }
 
 async function crawlPlatform(
@@ -202,6 +272,12 @@ async function runCrawler(): Promise<void> {
   const reportPath = await writeMarkdownReport(settings, posts, now);
   console.log(`Report written to ${reportPath}`);
 
+  if (settings.email.enabled) {
+    const reportDate = path.basename(reportPath, ".md");
+    await sendDigestReportEmail(settings, reportPath, reportDate);
+    console.log("Digest email sent.");
+  }
+
   const shouldView = await showCompletionDialog();
   if (shouldView) {
     await openReportInTerminal(reportPath);
@@ -260,6 +336,26 @@ async function main(): Promise<void> {
     case "run":
       await runCrawler();
       return;
+    case "email":
+      if (subcommand === "credentials") {
+        if (third === "set") {
+          await runEmailCredentialSet();
+          return;
+        }
+        if (third === "show") {
+          await runEmailCredentialShow();
+          return;
+        }
+        if (third === "delete") {
+          await runEmailCredentialDelete();
+          return;
+        }
+      }
+      if (subcommand === "test") {
+        await runEmailTest();
+        return;
+      }
+      break;
     case "schedule":
       if (subcommand === "install") {
         await runScheduleInstall();

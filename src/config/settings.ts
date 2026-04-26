@@ -22,6 +22,15 @@ const DEFAULT_SETTINGS = `app:
 schedule:
   notify_at: "08:00"
 
+email:
+  enabled: false
+  host: "smtp.gmail.com"
+  port: 587
+  secure: false
+  from: ""
+  to: ""
+  username: ""
+
 x:
   account_name: ""
 
@@ -49,6 +58,17 @@ function validateSettings(value: unknown): AppSettings {
   const timeZone = (data.app as { timezone?: unknown } | undefined)?.timezone;
   const notifyAt = (data.schedule as { notify_at?: unknown } | undefined)
     ?.notify_at;
+  const emailData = data.email as
+    | {
+        enabled?: unknown;
+        host?: unknown;
+        port?: unknown;
+        secure?: unknown;
+        from?: unknown;
+        to?: unknown;
+        username?: unknown;
+      }
+    | undefined;
 
   if (typeof timeZone !== "string" || timeZone.trim() === "") {
     throw new CliError("app.timezone is required in config/settings.yaml.");
@@ -63,12 +83,33 @@ function validateSettings(value: unknown): AppSettings {
   assertValidTimeZone(timeZone.trim());
   assertValidDailyTime(notifyAt.trim());
 
+  const emailEnabled = emailData?.enabled;
+  const emailHost = emailData?.host;
+  const emailPort = emailData?.port;
+  const emailSecure = emailData?.secure;
+  const emailFrom = emailData?.from;
+  const emailTo = emailData?.to;
+  const emailUsername = emailData?.username;
+
   return {
     app: {
       timezone: timeZone.trim(),
     },
     schedule: {
       notify_at: notifyAt.trim(),
+    },
+    email: {
+      enabled: typeof emailEnabled === "boolean" ? emailEnabled : false,
+      host: typeof emailHost === "string" ? emailHost.trim() : "",
+      port:
+        typeof emailPort === "number" && Number.isInteger(emailPort)
+          ? emailPort
+          : 0,
+      secure: typeof emailSecure === "boolean" ? emailSecure : false,
+      from: typeof emailFrom === "string" ? emailFrom.trim() : "",
+      to: typeof emailTo === "string" ? emailTo.trim() : "",
+      username:
+        typeof emailUsername === "string" ? emailUsername.trim() : "",
     },
     x: normalizePlatformConfig(data.x),
     facebook: normalizePlatformConfig(data.facebook),
