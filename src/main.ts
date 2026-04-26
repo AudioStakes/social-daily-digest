@@ -115,30 +115,43 @@ async function runCredentialDelete(platform: PlatformName): Promise<void> {
 }
 
 async function crawlPlatform(
-  context: BrowserContext,
+  page: Page,
   platform: PlatformName,
   accountName: string,
   cutoffMs: number,
 ): Promise<SocialPost[]> {
-  const page: Page = await context.newPage();
-  try {
-    if (platform === "x") {
-      return await crawlXFeed(
-        page,
-        accountName,
-        async () => await getCredential(platform, accountName),
-        cutoffMs,
-      );
-    }
-
-    return await crawlFacebookFeed(
+  if (platform === "x") {
+    return await crawlXFeed(
       page,
       accountName,
       async () => await getCredential(platform, accountName),
       cutoffMs,
     );
-  } finally {
-    await page.close();
+  }
+
+  return await crawlFacebookFeed(
+    page,
+    accountName,
+    async () => await getCredential(platform, accountName),
+    cutoffMs,
+  );
+}
+
+async function crawlPlatformWithManualRetry(
+  page: Page,
+  platform: PlatformName,
+  accountName: string,
+  cutoffMs: number,
+): Promise<SocialPost[]> {
+  try {
+    return await crawlPlatform(page, platform, accountName, cutoffMs);
+  } catch (error) {
+    if (!(error instanceof ManualActionRequiredError)) {
+      throw error;
+    }
+
+    await showManualActionDialog(platform === "x" ? "X" : "Facebook");
+    return await crawlPlatform(page, platform, accountName, cutoffMs);
   }
 }
 
@@ -164,24 +177,21 @@ async function runCrawler(): Promise<void> {
     for (const platform of enabledPlatforms) {
       const accountName = getAccountName(settings, platform);
       console.log(`Checking ${platform}...`);
-      let platformPosts: SocialPost[];
+      const page: Page = await context.newPage();
       try {
-        platformPosts = await crawlPlatform(
-          context,
+        const platformPosts = await crawlPlatformWithManualRetry(
+          page,
           platform,
           accountName,
           cutoffMs,
         );
+        console.log(`Collected ${platformPosts.length} ${platform} posts.`);
+        posts.push(...platformPosts);
       } catch (error) {
-        if (error instanceof ManualActionRequiredError) {
-          await showManualActionDialog(platform === "x" ? "X" : "Facebook");
-        }
-
         throw error;
+      } finally {
+        await page.close();
       }
-
-      console.log(`Collected ${platformPosts.length} ${platform} posts.`);
-      posts.push(...platformPosts);
     }
   } finally {
     if (context) {
