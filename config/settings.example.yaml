@@ -1,6 +1,10 @@
 app:
   timezone: Asia/Tokyo
 
+browser:
+  user_data_dir: "/Users/<you>/Library/Application Support/Google/Chrome"
+  profile_directory: "Default"
+
 schedule:
   notify_at: "08:00"
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import path from "node:path";
+import readline from "node:readline/promises";
 
 import type { BrowserContext, Page } from "playwright-core";
 
@@ -10,6 +11,13 @@ import {
   setCredential,
 } from "./auth/keychain.js";
 import { launchChrome } from "./browser/chrome.js";
+import {
+  assertConfiguredProfileExists,
+  discoverChromeProfiles,
+  getDedicatedProfileLabel,
+  resolveBrowserLaunchConfig,
+  saveBrowserProfileSelection,
+} from "./browser/profiles.js";
 import {
   ensureRuntimeDirectories,
   getAccountName,
@@ -36,7 +44,7 @@ import {
   openReportInTerminal,
   showCompletionDialog,
 } from "./macos/terminal.js";
-import { getChromeProfilePath } from "./paths.js";
+import { getChromeProfilePath, getChromeUserDataDir } from "./paths.js";
 import { writeMarkdownReport } from "./report/markdown.js";
 import { getScheduleStatus, installSchedule, uninstallSchedule } from "./schedule/launchd.js";
 import type { PlatformName, SocialPost } from "./types.js";
@@ -55,6 +63,7 @@ Commands:
   sns-digest email credentials show
   sns-digest email credentials delete
   sns-digest email test
+  sns-digest browser profiles
   sns-digest run
   sns-digest schedule install
   sns-digest schedule uninstall
@@ -72,11 +81,84 @@ function parsePlatform(value: string | undefined): PlatformName {
 
 async function runInit(): Promise<void> {
   const result = await initializeWorkspace();
+  const profiles = await discoverChromeProfiles();
+  const dedicatedOptionLabel = getDedicatedProfileLabel();
+  const options = [
+    ...profiles.map((profile) => profile.profileDirectory),
+    dedicatedOptionLabel,
+  ];
+
+  console.log("Available Chrome profiles:");
+  console.log("");
+  profiles.forEach((profile, index) => {
+    const label =
+      profile.displayName === profile.profileDirectory
+        ? profile.profileDirectory
+        : `${profile.displayName} (${profile.profileDirectory})`;
+    console.log(`${index + 1}. ${label}`);
+  });
+  console.log(`${options.length}. ${dedicatedOptionLabel}`);
+  console.log("");
+
+  let selected = 1;
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    const answer = await rl.question(
+      "? Which Chrome profile should social-daily-digest use? [1]: ",
+    );
+    rl.close();
+
+    const normalized = answer.trim();
+    if (normalized !== "") {
+      const parsed = Number(normalized);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > options.length) {
+        throw new CliError(`Invalid profile selection "${normalized}".`);
+      }
+
+      selected = parsed;
+    }
+  } else {
+    console.log("TTY not available. Defaulting to option 1.");
+  }
+
+  const selectedOption = options[selected - 1];
+  const selectedProfileDirectory =
+    selectedOption === dedicatedOptionLabel ? null : selectedOption;
+  await saveBrowserProfileSelection(selectedProfileDirectory);
+
   console.log(
     result.createdConfig
       ? "Initialized config/settings.yaml and local directories."
       : "Local directories are ready. config/settings.yaml already exists.",
   );
+  if (selectedProfileDirectory) {
+    console.log(
+      `Configured Chrome profile: ${selectedProfileDirectory} (${getChromeUserDataDir()})`,
+    );
+  } else {
+    console.log("Configured dedicated Chrome profile: browser_profiles/chrome");
+  }
+}
+
+async function runBrowserProfiles(): Promise<void> {
+  const profiles = await discoverChromeProfiles();
+  console.log("Available Chrome profiles:");
+
+  if (profiles.length === 0) {
+    console.log("- (none detected)");
+    return;
+  }
+
+  for (const profile of profiles) {
+    const label =
+      profile.displayName === profile.profileDirectory
+        ? profile.profileDirectory
+        : `${profile.displayName} (${profile.profileDirectory})`;
+    console.log(`- ${label}`);
+  }
 }
 
 async function runCredentialSet(platform: PlatformName): Promise<void> {
@@ -214,7 +296,18 @@ async function runCrawler(): Promise<void> {
   let context: BrowserContext | null = null;
 
   try {
-    context = await launchChrome(getChromeProfilePath());
+    const launchConfig = resolveBrowserLaunchConfig(settings, getChromeProfilePath());
+    if (launchConfig.usingDedicatedProfile) {
+      console.log("Using dedicated Chrome profile: browser_profiles/chrome");
+    } else {
+      await assertConfiguredProfileExists(settings);
+      console.log(`Using Chrome profile: ${launchConfig.profileDirectory}`);
+    }
+
+    context = await launchChrome(
+      launchConfig.userDataDir,
+      launchConfig.profileDirectory,
+    );
 
     for (const platform of enabledPlatforms) {
       console.log(`Checking ${platform}...`);
@@ -302,6 +395,12 @@ async function main(): Promise<void> {
     case "run":
       await runCrawler();
       return;
+    case "browser":
+      if (subcommand === "profiles") {
+        await runBrowserProfiles();
+        return;
+      }
+      break;
     case "email":
       if (subcommand === "credentials") {
         if (third === "set") {

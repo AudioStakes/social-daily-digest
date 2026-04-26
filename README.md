@@ -2,7 +2,7 @@
 
 `social-daily-digest` is a **macOS-only local CLI** that checks X and Facebook once per day, writes a Markdown digest report, and can optionally email that report to your own iCloud address.
 
-The tool is intentionally scoped for a single local user with a dedicated Google Chrome profile and macOS-native integrations (`security`, `osascript`, `open`, `launchctl`).
+The tool is intentionally scoped for a single local user with macOS-native integrations (`security`, `osascript`, `open`, `launchctl`) and Google Chrome profile reuse.
 
 ## MVP Scope
 
@@ -10,7 +10,7 @@ The tool is intentionally scoped for a single local user with a dedicated Google
 
 - Local-only execution on macOS.
 - Crawling X and Facebook with Playwright using local Google Chrome.
-- Manual-first login with session reuse via a dedicated local Google Chrome profile.
+- Manual-first login with session reuse via an existing local Google Chrome profile (or an optional dedicated profile).
 - Optional storage of platform credentials in macOS Keychain for future compatibility.
 - Generating a daily Markdown report at `reports/YYYY-MM-DD.md`.
 - Optional self-email delivery of the generated report when configured.
@@ -33,12 +33,19 @@ The tool is intentionally scoped for a single local user with a dedicated Google
 ```bash
 npm install
 npm run build
+npm link
 ```
 
 Initialize local directories and create starter config:
 
 ```bash
 sns-digest init
+```
+
+No-link alternative for local development:
+
+```bash
+node dist/main.js init
 ```
 
 ## Configuration
@@ -48,6 +55,10 @@ Main config file: `config/settings.yaml`
 ```yaml
 app:
   timezone: Asia/Tokyo
+
+browser:
+  user_data_dir: "/Users/<you>/Library/Application Support/Google/Chrome"
+  profile_directory: "Default"
 
 schedule:
   notify_at: "08:00"
@@ -61,6 +72,10 @@ x:
 facebook:
   account_name: ""
 ```
+
+`sns-digest init` lists local Chrome profiles (`Default`, `Profile 1`, etc.) and lets you choose one. Selecting an existing profile allows reuse of already logged-in X/Facebook sessions. A dedicated `browser_profiles/chrome` option remains available as a safer fallback.
+
+If the selected profile is already open in normal Google Chrome, close Chrome and re-run `sns-digest run` (or switch to the dedicated profile).
 
 ### Email setting behavior
 
@@ -123,6 +138,7 @@ sns-digest email credentials set
 sns-digest email credentials show
 sns-digest email credentials delete
 sns-digest email test
+sns-digest browser profiles
 sns-digest run
 sns-digest schedule install
 sns-digest schedule uninstall
@@ -145,8 +161,8 @@ sns-digest schedule show
 
 ## Runtime behavior (`sns-digest run`)
 
-1. Open configured platforms (X/Facebook) in the dedicated Chrome profile under `browser_profiles/`.
-2. Reuse any existing logged-in session from that dedicated profile.
+1. Open configured platforms (X/Facebook) in the configured Chrome profile from `config/settings.yaml`.
+2. Reuse any existing logged-in session from that chosen profile.
 3. If a platform is logged out, show a macOS dialog asking for manual login in the opened Chrome window.
 4. After you click **OK**, navigate again to the platform home/feed and verify login state.
 5. Continue crawling only when login is confirmed; otherwise fail with a clear manual-login-required error.
@@ -154,6 +170,14 @@ sns-digest schedule show
 7. Generate `reports/YYYY-MM-DD.md`.
 8. If `email.address` is set, send the report by email with subject `[Social Daily Digest] YYYY-MM-DD` and plain-text body equal to the Markdown report content.
 9. Show the existing macOS completion dialog.
+
+### Browser profile discovery command
+
+Use this safe command to list detected local Chrome profiles without launching Chrome:
+
+```bash
+sns-digest browser profiles
+```
 
 ## Scheduling
 

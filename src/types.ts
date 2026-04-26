@@ -8,6 +8,10 @@ export interface AppSettings {
   app: {
     timezone: string;
   };
+  browser: {
+    user_data_dir: string;
+    profile_directory: string;
+  } | null;
   schedule: {
     notify_at: string;
   };

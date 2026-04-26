@@ -29,6 +29,16 @@ export function getChromeProfilePath(): string {
   return path.join(getBrowserProfileRoot(), "chrome");
 }
 
+export function getChromeUserDataDir(): string {
+  return path.join(
+    os.homedir(),
+    "Library",
+    "Application Support",
+    "Google",
+    "Chrome",
+  );
+}
+
 export function getDataDirectory(): string {
   return path.join(getProjectRoot(), "data");
 }

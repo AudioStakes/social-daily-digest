@@ -20,17 +20,36 @@ export async function getChromeExecutablePath(): Promise<string> {
 }
 
 export async function launchChrome(
-  profilePath: string,
+  userDataDir: string,
+  profileDirectory: string | null,
 ): Promise<BrowserContext> {
   const executablePath = await getChromeExecutablePath();
+  const args = ["--start-maximized"];
 
-  return await chromium.launchPersistentContext(profilePath, {
-    executablePath,
-    headless: false,
-    viewport: {
-      width: 1440,
-      height: 900,
-    },
-    args: ["--start-maximized"],
-  });
+  if (profileDirectory) {
+    args.push(`--profile-directory=${profileDirectory}`);
+  }
+
+  try {
+    return await chromium.launchPersistentContext(userDataDir, {
+      executablePath,
+      headless: false,
+      viewport: {
+        width: 1440,
+        height: 900,
+      },
+      args,
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /singleton|profile|in use|already running|lock/i.test(error.message)
+    ) {
+      throw new CliError(
+        "The selected Chrome profile appears to be in use. Close Google Chrome and try again, or choose the dedicated social-daily-digest profile.",
+      );
+    }
+
+    throw error;
+  }
 }
