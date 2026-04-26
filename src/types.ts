@@ -11,6 +11,15 @@ export interface AppSettings {
   schedule: {
     notify_at: string;
   };
+  email: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    secure: boolean;
+    from: string;
+    to: string;
+    username: string;
+  };
   x: PlatformConfig;
   facebook: PlatformConfig;
 }
