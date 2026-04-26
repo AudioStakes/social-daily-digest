@@ -1,10 +1,10 @@
 import type { Page } from "playwright-core";
 
 import { ManualActionRequiredError } from "../errors.js";
+import { showManualActionDialog } from "../macos/terminal.js";
 import type { SocialPost } from "../types.js";
 import {
   assertNoManualChallenge,
-  clickFirstVisible,
   dedupePosts,
   filterRecentPosts,
 } from "./common.js";
@@ -23,65 +23,6 @@ async function isLoggedIn(page: Page): Promise<boolean> {
   }
 
   return (await page.locator("article").count()) > 0;
-}
-
-async function loginToX(
-  page: Page,
-  accountName: string,
-  password: string,
-): Promise<void> {
-  await page.goto("https://x.com/i/flow/login", {
-    waitUntil: "domcontentloaded",
-  });
-  await page.waitForTimeout(2_000);
-
-  const accountInput = page
-    .locator('input[autocomplete="username"], input[name="text"]')
-    .first();
-  await accountInput.waitFor({ state: "visible", timeout: 15_000 });
-  await accountInput.fill(accountName);
-  await clickFirstVisible(page, [
-    'div[role="button"]:has-text("Next")',
-    'button:has-text("Next")',
-  ]);
-  await page.waitForTimeout(2_000);
-
-  const challengeInput = page
-    .locator('input[data-testid="ocfEnterTextTextInput"], input[name="text"]')
-    .first();
-  if (
-    (await challengeInput.count()) > 0 &&
-    (await page.locator('input[name="password"]').count()) === 0
-  ) {
-    await challengeInput.fill(accountName);
-    await clickFirstVisible(page, [
-      'div[role="button"]:has-text("Next")',
-      'button:has-text("Next")',
-    ]);
-    await page.waitForTimeout(2_000);
-  }
-
-  const passwordInput = page.locator('input[name="password"]').first();
-  if ((await passwordInput.count()) === 0) {
-    throw new ManualActionRequiredError(
-      "X did not show the password form after entering the account name.",
-    );
-  }
-
-  await passwordInput.fill(password);
-  await clickFirstVisible(page, [
-    'button[data-testid="LoginForm_Login_Button"]',
-    'div[role="button"]:has-text("Log in")',
-  ]);
-  await page.waitForTimeout(4_000);
-
-  await assertNoManualChallenge(page, "X", [
-    /captcha/i,
-    /suspicious/i,
-    /enter your phone number/i,
-    /account\/access/i,
-    /verify/i,
-  ]);
 }
 
 async function scrapePosts(page: Page, cutoffMs: number): Promise<SocialPost[]> {
@@ -138,16 +79,15 @@ async function scrapePosts(page: Page, cutoffMs: number): Promise<SocialPost[]> 
 
 export async function crawlXFeed(
   page: Page,
-  accountName: string,
-  getPassword: () => Promise<string>,
   cutoffMs: number,
 ): Promise<SocialPost[]> {
   await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2_000);
 
   if (!(await isLoggedIn(page))) {
-    const password = await getPassword();
-    await loginToX(page, accountName, password);
+    await showManualActionDialog(
+      "X needs manual login. Complete login in the opened Google Chrome window, then click OK to continue.",
+    );
     await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(3_000);
   }
@@ -161,7 +101,9 @@ export async function crawlXFeed(
   ]);
 
   if (!(await isLoggedIn(page))) {
-    throw new ManualActionRequiredError("X login could not be completed automatically.");
+    throw new ManualActionRequiredError(
+      "X login is still incomplete after manual login confirmation.",
+    );
   }
 
   return await scrapePosts(page, cutoffMs);

@@ -1,6 +1,7 @@
 import type { Page } from "playwright-core";
 
 import { ManualActionRequiredError } from "../errors.js";
+import { showManualActionDialog } from "../macos/terminal.js";
 import type { SocialPost } from "../types.js";
 import { assertNoManualChallenge, dedupePosts, filterRecentPosts } from "./common.js";
 
@@ -14,30 +15,6 @@ async function isLoggedIn(page: Page): Promise<boolean> {
   }
 
   return (await page.locator('[role="feed"], [role="main"] [role="article"]').count()) > 0;
-}
-
-async function loginToFacebook(
-  page: Page,
-  accountName: string,
-  password: string,
-): Promise<void> {
-  await page.goto("https://www.facebook.com/login", {
-    waitUntil: "domcontentloaded",
-  });
-  await page.waitForTimeout(2_000);
-
-  await page.locator('input[name="email"]').first().fill(accountName);
-  await page.locator('input[name="pass"]').first().fill(password);
-  await page.locator('button[name="login"]').first().click();
-  await page.waitForTimeout(4_000);
-
-  await assertNoManualChallenge(page, "Facebook", [
-    /checkpoint/i,
-    /two-step/i,
-    /confirm your identity/i,
-    /security check/i,
-    /captcha/i,
-  ]);
 }
 
 async function scrapePosts(page: Page, cutoffMs: number): Promise<SocialPost[]> {
@@ -119,8 +96,6 @@ async function scrapePosts(page: Page, cutoffMs: number): Promise<SocialPost[]> 
 
 export async function crawlFacebookFeed(
   page: Page,
-  accountName: string,
-  getPassword: () => Promise<string>,
   cutoffMs: number,
 ): Promise<SocialPost[]> {
   await page.goto("https://www.facebook.com/", {
@@ -129,8 +104,9 @@ export async function crawlFacebookFeed(
   await page.waitForTimeout(2_000);
 
   if (!(await isLoggedIn(page))) {
-    const password = await getPassword();
-    await loginToFacebook(page, accountName, password);
+    await showManualActionDialog(
+      "Facebook needs manual login. Complete login in the opened Google Chrome window, then click OK to continue.",
+    );
     await page.goto("https://www.facebook.com/", {
       waitUntil: "domcontentloaded",
     });
@@ -147,7 +123,7 @@ export async function crawlFacebookFeed(
 
   if (!(await isLoggedIn(page))) {
     throw new ManualActionRequiredError(
-      "Facebook login could not be completed automatically.",
+      "Facebook login is still incomplete after manual login confirmation.",
     );
   }
 

@@ -20,10 +20,10 @@ export async function showCompletionDialog(): Promise<boolean> {
   return result.stdout === "View";
 }
 
-export async function showManualActionDialog(platformLabel: string): Promise<void> {
+export async function showManualActionDialog(message: string): Promise<void> {
   await runCommand("osascript", [
     "-e",
-    `display dialog "Manual verification is required for ${platformLabel}. Complete it in Google Chrome, then click OK to continue." buttons {"OK"} default button "OK"`,
+    `display dialog "${message.replaceAll('"', '\\"')}" buttons {"OK"} default button "OK"`,
   ]);
 }
 

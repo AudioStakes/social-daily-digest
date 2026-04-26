@@ -58,7 +58,7 @@ export async function assertNoManualChallenge(
 
   if (patterns.some((pattern) => pattern.test(normalized))) {
     throw new ManualActionRequiredError(
-      `${platformLabel} requested a manual verification step.`,
+      `${platformLabel} requires manual login or verification in Google Chrome.`,
     );
   }
 }

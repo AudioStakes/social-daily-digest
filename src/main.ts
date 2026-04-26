@@ -6,7 +6,6 @@ import type { BrowserContext, Page } from "playwright-core";
 
 import {
   deleteCredential,
-  getCredential,
   hasCredential,
   setCredential,
 } from "./auth/keychain.js";
@@ -36,7 +35,6 @@ import { promptHidden } from "./macos/prompt.js";
 import {
   openReportInTerminal,
   showCompletionDialog,
-  showManualActionDialog,
 } from "./macos/terminal.js";
 import { getChromeProfilePath } from "./paths.js";
 import { writeMarkdownReport } from "./report/markdown.js";
@@ -97,7 +95,9 @@ async function runCredentialSet(platform: PlatformName): Promise<void> {
   }
 
   await setCredential(platform, accountName, password);
-  console.log(`${platform} credential stored in macOS Keychain.`);
+  console.log(
+    `${platform} credential stored in macOS Keychain (optional; crawler uses manual login in Chrome).`,
+  );
 }
 
 async function runCredentialShow(): Promise<void> {
@@ -188,42 +188,13 @@ async function runEmailTest(): Promise<void> {
 async function crawlPlatform(
   page: Page,
   platform: PlatformName,
-  accountName: string,
   cutoffMs: number,
 ): Promise<SocialPost[]> {
   if (platform === "x") {
-    return await crawlXFeed(
-      page,
-      accountName,
-      async () => await getCredential(platform, accountName),
-      cutoffMs,
-    );
+    return await crawlXFeed(page, cutoffMs);
   }
 
-  return await crawlFacebookFeed(
-    page,
-    accountName,
-    async () => await getCredential(platform, accountName),
-    cutoffMs,
-  );
-}
-
-async function crawlPlatformWithManualRetry(
-  page: Page,
-  platform: PlatformName,
-  accountName: string,
-  cutoffMs: number,
-): Promise<SocialPost[]> {
-  try {
-    return await crawlPlatform(page, platform, accountName, cutoffMs);
-  } catch (error) {
-    if (!(error instanceof ManualActionRequiredError)) {
-      throw error;
-    }
-
-    await showManualActionDialog(platform === "x" ? "X" : "Facebook");
-    return await crawlPlatform(page, platform, accountName, cutoffMs);
-  }
+  return await crawlFacebookFeed(page, cutoffMs);
 }
 
 async function runCrawler(): Promise<void> {
@@ -246,16 +217,10 @@ async function runCrawler(): Promise<void> {
     context = await launchChrome(getChromeProfilePath());
 
     for (const platform of enabledPlatforms) {
-      const accountName = getAccountName(settings, platform);
       console.log(`Checking ${platform}...`);
       const page: Page = await context.newPage();
       try {
-        const platformPosts = await crawlPlatformWithManualRetry(
-          page,
-          platform,
-          accountName,
-          cutoffMs,
-        );
+        const platformPosts = await crawlPlatform(page, platform, cutoffMs);
         console.log(`Collected ${platformPosts.length} ${platform} posts.`);
         posts.push(...platformPosts);
       } catch (error) {

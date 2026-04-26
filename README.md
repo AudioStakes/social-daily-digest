@@ -10,7 +10,8 @@ The tool is intentionally scoped for a single local user with a dedicated Google
 
 - Local-only execution on macOS.
 - Crawling X and Facebook with Playwright using local Google Chrome.
-- Storing platform credentials in macOS Keychain only.
+- Manual-first login with session reuse via a dedicated local Google Chrome profile.
+- Optional storage of platform credentials in macOS Keychain for future compatibility.
 - Generating a daily Markdown report at `reports/YYYY-MM-DD.md`.
 - Optional self-email delivery of the generated report when configured.
 - Daily scheduling through `launchd`.
@@ -80,7 +81,9 @@ email:
 
 ### SNS credentials
 
-Store X / Facebook passwords in macOS Keychain:
+X and Facebook login is handled manually inside the opened Google Chrome window.
+
+You can still store X / Facebook passwords in macOS Keychain as **optional / reserved for future compatibility**, but the crawler does **not** auto-type these values into login forms:
 
 ```bash
 sns-digest credentials set x
@@ -105,6 +108,7 @@ sns-digest email credentials set
 - Do not store SNS or email passwords in YAML, `.env`, SQLite, logs, reports, or source code.
 - Email password must be stored only in macOS Keychain.
 - Do not print Keychain secret values.
+- The crawler does not bypass MFA, passkeys, CAPTCHA, suspicious login checks, or account verification. Complete those steps manually in Chrome when prompted.
 
 ## CLI Commands
 
@@ -141,10 +145,15 @@ sns-digest schedule show
 
 ## Runtime behavior (`sns-digest run`)
 
-1. Crawl configured platforms (X/Facebook).
-2. Generate `reports/YYYY-MM-DD.md`.
-3. If `email.address` is set, send the report by email with subject `[Social Daily Digest] YYYY-MM-DD` and plain-text body equal to the Markdown report content.
-4. Show the existing macOS completion dialog.
+1. Open configured platforms (X/Facebook) in the dedicated Chrome profile under `browser_profiles/`.
+2. Reuse any existing logged-in session from that dedicated profile.
+3. If a platform is logged out, show a macOS dialog asking for manual login in the opened Chrome window.
+4. After you click **OK**, navigate again to the platform home/feed and verify login state.
+5. Continue crawling only when login is confirmed; otherwise fail with a clear manual-login-required error.
+6. Crawl configured platforms (X/Facebook).
+7. Generate `reports/YYYY-MM-DD.md`.
+8. If `email.address` is set, send the report by email with subject `[Social Daily Digest] YYYY-MM-DD` and plain-text body equal to the Markdown report content.
+9. Show the existing macOS completion dialog.
 
 ## Scheduling
 
