@@ -1,10 +1,48 @@
 # social-daily-digest
 
-macOS ローカル専用の CLI ツールです。X / Facebook を日次でクロールし、Markdown レポートを生成します。
+`social-daily-digest` is a **macOS-only local CLI** that checks X and Facebook once per day, writes a Markdown digest report, and can optionally email that report to your own iCloud address.
 
-## 設定
+The tool is intentionally scoped for a single local user with a dedicated Google Chrome profile and macOS-native integrations (`security`, `osascript`, `open`, `launchctl`).
 
-設定ファイル: `config/settings.yaml`
+## MVP Scope
+
+### In scope
+
+- Local-only execution on macOS.
+- Crawling X and Facebook with Playwright using local Google Chrome.
+- Storing platform credentials in macOS Keychain only.
+- Generating a daily Markdown report at `reports/YYYY-MM-DD.md`.
+- Optional self-email delivery of the generated report when configured.
+- Daily scheduling through `launchd`.
+
+### Non-goals
+
+- Non-macOS support.
+- Cloud-hosted crawling, storage, or notifications.
+- Browser engines other than local Google Chrome.
+
+## Requirements
+
+- macOS
+- Node.js 20+
+- Google Chrome installed in the standard macOS Applications path
+
+## Setup
+
+```bash
+npm install
+npm run build
+```
+
+Initialize local directories and create starter config:
+
+```bash
+sns-digest init
+```
+
+## Configuration
+
+Main config file: `config/settings.yaml`
 
 ```yaml
 app:
@@ -14,13 +52,7 @@ schedule:
   notify_at: "08:00"
 
 email:
-  enabled: false
-  host: "smtp.gmail.com"
-  port: 587
-  secure: false
-  from: ""
-  to: ""
-  username: ""
+  address: "your-address@icloud.com"
 
 x:
   account_name: ""
@@ -29,18 +61,52 @@ facebook:
   account_name: ""
 ```
 
-- `email.enabled: false` の場合、メール設定が空でもエラーにしません。
-- `email.enabled: true` の場合、SMTP 送信を実行します。
-- `email.username` 未指定時は `email.from` を SMTP ユーザー名として利用します。
+### Email setting behavior
 
-## 認証情報の保存方針
+The email setting must be exactly:
 
-- SNS パスワードと SMTP パスワードは **macOS Keychain のみ** に保存します。
-- YAML / `.env` / ログ / レポート / ソースコードにパスワードを保存しません。
-- メール用 Keychain service 名: `social-daily-digest:email`
-- メール用 Keychain account 名: `email.username || email.from`
+```yaml
+email:
+  address: "your-address@icloud.com"
+```
 
-## CLI
+- If `email.address` is empty, email delivery is skipped.
+- If `email.address` is set, `sns-digest run` sends the generated report to that same address.
+- The same address is used as SMTP username, sender (`from`), and recipient (`to`).
+- SMTP details are fixed internally for iCloud Mail (`smtp.mail.me.com:587`, STARTTLS).
+- No additional email YAML fields are required or used.
+
+## Credentials and Security
+
+### SNS credentials
+
+Store X / Facebook passwords in macOS Keychain:
+
+```bash
+sns-digest credentials set x
+sns-digest credentials set facebook
+```
+
+### Email credential (Apple app-specific password)
+
+For iCloud Mail SMTP, create an **Apple app-specific password** and store it via CLI:
+
+```bash
+sns-digest email credentials set
+```
+
+- Do **not** use your normal Apple Account password.
+- The app-specific password is stored only in macOS Keychain.
+- Keychain service name: `social-daily-digest:email`
+- Keychain account name: `email.address`
+
+### Security requirements
+
+- Do not store SNS or email passwords in YAML, `.env`, SQLite, logs, reports, or source code.
+- Email password must be stored only in macOS Keychain.
+- Do not print Keychain secret values.
+
+## CLI Commands
 
 ```text
 sns-digest init
@@ -59,24 +125,52 @@ sns-digest schedule uninstall
 sns-digest schedule show
 ```
 
-### Email コマンド
+### Email commands
 
 - `sns-digest email credentials set`
-  - SMTP パスワードを対話入力で受け取り Keychain に保存します。
+  - Reads `email.address` from `config/settings.yaml`
+  - Prompts for the iCloud app-specific password with hidden input
+  - Stores password in macOS Keychain
 - `sns-digest email credentials show`
-  - 保存済みかどうかのみ表示します（パスワードは非表示）。
+  - Prints only configured/not configured status
+  - Never prints the password
 - `sns-digest email credentials delete`
-  - Keychain から SMTP パスワードを削除します。
+  - Deletes the stored Keychain password for configured `email.address`
 - `sns-digest email test`
-  - 現在設定 + Keychain パスワードでテストメールを送信します。
+  - Sends a test email to `email.address` from `email.address`
 
-## run 時の動作
+## Runtime behavior (`sns-digest run`)
 
-`email.enabled: true` のとき、`sns-digest run` はレポート生成後に次を実行します。
+1. Crawl configured platforms (X/Facebook).
+2. Generate `reports/YYYY-MM-DD.md`.
+3. If `email.address` is set, send the report by email with subject `[Social Daily Digest] YYYY-MM-DD` and plain-text body equal to the Markdown report content.
+4. Show the existing macOS completion dialog.
 
-1. 生成済み `reports/YYYY-MM-DD.md` を読み込む
-2. 件名 `[Social Daily Digest] YYYY-MM-DD` で送信
-3. 本文は Markdown レポート本文をそのまま送信
-4. 送信成功後、従来どおり macOS ダイアログを表示
+## Scheduling
 
-`email.enabled: false` のときはメール送信処理をスキップします。
+Install daily `launchd` job:
+
+```bash
+sns-digest schedule install
+```
+
+Remove job:
+
+```bash
+sns-digest schedule uninstall
+```
+
+Show current status:
+
+```bash
+sns-digest schedule show
+```
+
+## MVP Acceptance Criteria
+
+- `sns-digest init` creates local workspace/config.
+- `sns-digest run` generates a deterministic daily Markdown report.
+- Optional email delivery succeeds when `email.address` is configured and a Keychain credential exists.
+- Email delivery is skipped cleanly when `email.address` is empty.
+- All credentials remain in macOS Keychain only.
+- Scheduling works through `launchd`.

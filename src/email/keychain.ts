@@ -72,7 +72,7 @@ export async function getEmailCredential(accountName: string): Promise<string> {
 
   if (!result.success) {
     throw new CliError(
-      `Missing email credential for "${accountName}". Run "sns-digest email credentials set".`,
+      'Email is configured, but the iCloud Mail app-specific password is missing. Run "sns-digest email credentials set" and use an Apple app-specific password.',
     );
   }
 

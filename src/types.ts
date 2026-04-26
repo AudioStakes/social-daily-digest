@@ -12,13 +12,7 @@ export interface AppSettings {
     notify_at: string;
   };
   email: {
-    enabled: boolean;
-    host: string;
-    port: number;
-    secure: boolean;
-    from: string;
-    to: string;
-    username: string;
+    address: string;
   };
   x: PlatformConfig;
   facebook: PlatformConfig;

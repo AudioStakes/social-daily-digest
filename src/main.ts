@@ -26,7 +26,8 @@ import {
   setEmailCredential,
 } from "./email/keychain.js";
 import {
-  resolveEmailAccountName,
+  isEmailEnabled,
+  resolveEmailAddress,
   sendDigestReportEmail,
   sendTestEmail,
 } from "./email/smtp.js";
@@ -132,14 +133,14 @@ async function runCredentialDelete(platform: PlatformName): Promise<void> {
 
 async function runEmailCredentialSet(): Promise<void> {
   const settings = await loadSettings();
-  const accountName = resolveEmailAccountName(settings);
+  const accountName = resolveEmailAddress(settings);
   if (accountName === "") {
     throw new CliError(
-      'Set email.username or email.from in config/settings.yaml before storing email credentials.',
+      "config/settings.yaml is missing email.address. Set it before storing email credentials.",
     );
   }
 
-  const password = await promptHidden("SMTP password: ");
+  const password = await promptHidden("iCloud Mail app-specific password: ");
   if (password.trim() === "") {
     throw new CliError("Password cannot be empty.");
   }
@@ -150,10 +151,10 @@ async function runEmailCredentialSet(): Promise<void> {
 
 async function runEmailCredentialShow(): Promise<void> {
   const settings = await loadSettings();
-  const accountName = resolveEmailAccountName(settings);
+  const accountName = resolveEmailAddress(settings);
 
   if (accountName === "") {
-    console.log("Email: not configured (set email.username or email.from)");
+    console.log("Email: not configured");
     return;
   }
 
@@ -163,10 +164,10 @@ async function runEmailCredentialShow(): Promise<void> {
 
 async function runEmailCredentialDelete(): Promise<void> {
   const settings = await loadSettings();
-  const accountName = resolveEmailAccountName(settings);
+  const accountName = resolveEmailAddress(settings);
   if (accountName === "") {
     throw new CliError(
-      'Set email.username or email.from in config/settings.yaml before deleting email credentials.',
+      "config/settings.yaml is missing email.address. Set it before deleting email credentials.",
     );
   }
 
@@ -272,7 +273,7 @@ async function runCrawler(): Promise<void> {
   const reportPath = await writeMarkdownReport(settings, posts, now);
   console.log(`Report written to ${reportPath}`);
 
-  if (settings.email.enabled) {
+  if (isEmailEnabled(settings)) {
     const reportDate = path.basename(reportPath, ".md");
     await sendDigestReportEmail(settings, reportPath, reportDate);
     console.log("Digest email sent.");
