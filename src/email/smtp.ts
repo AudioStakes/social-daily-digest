@@ -4,49 +4,57 @@ import { CliError } from "../errors.js";
 import type { AppSettings } from "../types.js";
 import { getEmailCredential } from "./keychain.js";
 
-interface ResolvedEmailConfig {
-  host: string;
-  port: number;
-  secure: boolean;
-  from: string;
-  to: string;
-  username: string;
+const ICLOUD_SMTP_HOST = "smtp.mail.me.com";
+const ICLOUD_SMTP_PORT = 587;
+
+export function resolveEmailAddress(settings: AppSettings): string {
+  return settings.email.address.trim();
 }
 
-export function resolveEmailAccountName(settings: AppSettings): string {
-  return settings.email.username || settings.email.from;
+export function isEmailEnabled(settings: AppSettings): boolean {
+  return resolveEmailAddress(settings) !== "";
 }
 
-function resolveEmailConfig(settings: AppSettings): ResolvedEmailConfig {
-  const accountName = resolveEmailAccountName(settings);
-  if (settings.email.host === "") {
-    throw new CliError('email.host is required when email.enabled is true.');
-  }
-  if (settings.email.port <= 0) {
-    throw new CliError('email.port is required when email.enabled is true.');
-  }
-  if (settings.email.to === "") {
-    throw new CliError('email.to is required when email.enabled is true.');
-  }
-  if (settings.email.from === "") {
-    throw new CliError(
-      'email.from is required when email.enabled is true in this version.',
-    );
-  }
-  if (accountName === "") {
-    throw new CliError(
-      'email.username or email.from is required when email.enabled is true.',
-    );
+function getConfiguredAddressOrThrow(settings: AppSettings): string {
+  const address = resolveEmailAddress(settings);
+  if (address === "") {
+    throw new CliError("config/settings.yaml is missing email.address.");
   }
 
-  return {
-    host: settings.email.host,
-    port: settings.email.port,
-    secure: settings.email.secure,
-    from: settings.email.from,
-    to: settings.email.to,
-    username: accountName,
-  };
+  return address;
+}
+
+async function sendIcloudMail(params: {
+  address: string;
+  subject: string;
+  body: string;
+  errorMessage: string;
+}): Promise<void> {
+  const nodemailerModule = await import("nodemailer");
+  const nodemailer = nodemailerModule.default;
+  const password = await getEmailCredential(params.address);
+
+  const transporter = nodemailer.createTransport({
+    host: ICLOUD_SMTP_HOST,
+    port: ICLOUD_SMTP_PORT,
+    secure: false,
+    requireTLS: true,
+    auth: {
+      user: params.address,
+      pass: password,
+    },
+  });
+
+  try {
+    await transporter.sendMail({
+      from: params.address,
+      to: params.address,
+      subject: params.subject,
+      text: params.body,
+    });
+  } catch {
+    throw new CliError(params.errorMessage);
+  }
 }
 
 export async function sendDigestReportEmail(
@@ -54,57 +62,24 @@ export async function sendDigestReportEmail(
   reportPath: string,
   dateText: string,
 ): Promise<void> {
-  const nodemailerModule = await import("nodemailer");
-  const nodemailer = nodemailerModule.default;
-  const config = resolveEmailConfig(settings);
-  const password = await getEmailCredential(config.username);
+  const address = getConfiguredAddressOrThrow(settings);
   const reportBody = await readFile(reportPath, "utf8");
 
-  const transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: {
-      user: config.username,
-      pass: password,
-    },
+  await sendIcloudMail({
+    address,
+    subject: `[Social Daily Digest] ${dateText}`,
+    body: reportBody,
+    errorMessage: "Failed to send digest email via iCloud Mail SMTP.",
   });
-
-  try {
-    await transporter.sendMail({
-      from: config.from,
-      to: config.to,
-      subject: `[Social Daily Digest] ${dateText}`,
-      text: reportBody,
-    });
-  } catch {
-    throw new CliError("Failed to send digest email via SMTP.");
-  }
 }
 
 export async function sendTestEmail(settings: AppSettings): Promise<void> {
-  const nodemailerModule = await import("nodemailer");
-  const nodemailer = nodemailerModule.default;
-  const config = resolveEmailConfig(settings);
-  const password = await getEmailCredential(config.username);
-  const transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: {
-      user: config.username,
-      pass: password,
-    },
-  });
+  const address = getConfiguredAddressOrThrow(settings);
 
-  try {
-    await transporter.sendMail({
-      from: config.from,
-      to: config.to,
-      subject: "[Social Daily Digest] Test",
-      text: "This is a test email from sns-digest.",
-    });
-  } catch {
-    throw new CliError("Failed to send test email via SMTP.");
-  }
+  await sendIcloudMail({
+    address,
+    subject: "[Social Daily Digest] Test",
+    body: "This is a test email from social-daily-digest.",
+    errorMessage: "Failed to send test email via iCloud Mail SMTP.",
+  });
 }
