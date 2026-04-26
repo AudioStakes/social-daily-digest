@@ -53,6 +53,9 @@ function validateSettings(value: unknown): AppSettings {
   const notifyAt = (data.schedule as { notify_at?: unknown } | undefined)
     ?.notify_at;
   const emailAddress = (data.email as { address?: unknown } | undefined)?.address;
+  const browserData = data.browser as
+    | { user_data_dir?: unknown; profile_directory?: unknown }
+    | undefined;
 
   if (typeof timeZone !== "string" || timeZone.trim() === "") {
     throw new CliError("app.timezone is required in config/settings.yaml.");
@@ -77,6 +80,17 @@ function validateSettings(value: unknown): AppSettings {
     email: {
       address: typeof emailAddress === "string" ? emailAddress.trim() : "",
     },
+    browser:
+      browserData &&
+      typeof browserData.user_data_dir === "string" &&
+      browserData.user_data_dir.trim() !== "" &&
+      typeof browserData.profile_directory === "string" &&
+      browserData.profile_directory.trim() !== ""
+        ? {
+            user_data_dir: browserData.user_data_dir.trim(),
+            profile_directory: browserData.profile_directory.trim(),
+          }
+        : null,
     x: normalizePlatformConfig(data.x),
     facebook: normalizePlatformConfig(data.facebook),
   };
