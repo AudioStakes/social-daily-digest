@@ -51,6 +51,10 @@ export function getXSnapshotsDirectory(): string {
   return path.join(getDataDirectory(), "x_snapshots");
 }
 
+export function getXSnapshotPath(reportDate: string): string {
+  return path.join(getXSnapshotsDirectory(), `${reportDate}.html`);
+}
+
 export function getLogsDirectory(): string {
   return path.join(getProjectRoot(), "logs");
 }

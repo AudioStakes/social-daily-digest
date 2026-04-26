@@ -24,7 +24,7 @@ import {
   initializeWorkspace,
   loadSettings,
 } from "./config/settings.js";
-import { crawlXFeed } from "./crawler/x.js";
+import { crawlXFeed, loadXFeedSnapshotFromDisk } from "./crawler/x.js";
 import {
   deleteEmailCredential,
   hasEmailCredential,
@@ -42,6 +42,7 @@ import { getChromeProfilePath, getChromeUserDataDir } from "./paths.js";
 import { writeMarkdownReport } from "./report/markdown.js";
 import { getScheduleStatus, installSchedule, uninstallSchedule } from "./schedule/launchd.js";
 import type { PlatformName, SocialPost } from "./types.js";
+import { formatDateInTimeZone } from "./util/time.js";
 
 function printUsage(): void {
   console.log(`sns-digest
@@ -266,7 +267,24 @@ async function runCrawler(): Promise<void> {
   }
 
   const now = new Date();
+  const reportDate = formatDateInTimeZone(now, settings.app.timezone);
   const cutoffMs = now.getTime() - 24 * 60 * 60 * 1_000;
+  const savedPosts = await loadXFeedSnapshotFromDisk(reportDate, cutoffMs);
+  if (savedPosts) {
+    console.log(`Using saved X snapshot: ${reportDate}`);
+    console.log(`Collected ${savedPosts.length} x posts.`);
+
+    const reportPath = await writeMarkdownReport(settings, savedPosts, now);
+    console.log(`Report written to ${reportPath}`);
+
+    if (isEmailEnabled(settings)) {
+      const reportDateFromPath = path.basename(reportPath, ".md");
+      await sendDigestReportEmail(settings, reportPath, reportDateFromPath);
+      console.log("Digest email sent.");
+    }
+    return;
+  }
+
   const posts: SocialPost[] = [];
   let context: BrowserContext | null = null;
 
@@ -287,9 +305,9 @@ async function runCrawler(): Promise<void> {
       launchConfig.profileDirectory,
     );
 
-    console.log("Checking x...");
     const page: Page = await context.newPage();
     try {
+      console.log("Checking x...");
       const xPosts = await crawlXFeed(page, cutoffMs);
       console.log(`Collected ${xPosts.length} x posts.`);
       posts.push(...xPosts);

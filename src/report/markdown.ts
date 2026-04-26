@@ -3,7 +3,11 @@ import path from "node:path";
 import { getReportsDirectory } from "../paths.js";
 import type { AppSettings, SocialPost } from "../types.js";
 import { ensureDirectory, writeTextFile } from "../util/files.js";
-import { formatDateInTimeZone, formatDateTimeInTimeZone } from "../util/time.js";
+import {
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+  formatTimeWithSecondsInTimeZone,
+} from "../util/time.js";
 
 function indentLines(value: string): string {
   return value
@@ -17,31 +21,34 @@ function escapeMarkdownText(value: string): string {
 }
 
 function buildPostMeta(post: SocialPost, timeZone: string): string {
-  const parts: string[] = [];
-
-  if (post.publishedAtMs !== null) {
-    parts.push(formatDateTimeInTimeZone(new Date(post.publishedAtMs), timeZone));
-  } else {
-    parts.push(post.publishedAtLabel);
-  }
+  const timeText =
+    post.publishedAtMs !== null
+      ? formatTimeWithSecondsInTimeZone(new Date(post.publishedAtMs), timeZone)
+      : post.publishedAtLabel;
+  const linkLabel = post.isRepost ? "repost" : "post";
+  const details: string[] = [];
 
   if (post.isRepost) {
-    parts.push("REPOST");
+    if (post.repostedAccount) {
+      details.push(`repost of @${post.repostedAccount}`);
+    } else {
+      details.push("repost");
+    }
   }
 
-  if (post.repostedAccount) {
-    parts.push(`of @${post.repostedAccount}`);
-  }
-
+  const media: string[] = [];
   if (post.hasImage) {
-    parts.push("IMAGE");
+    media.push("image");
   }
-
   if (post.hasVideo) {
-    parts.push("VIDEO");
+    media.push("video");
+  }
+  if (media.length > 0) {
+    details.push(`with ${media.join(", ")}`);
   }
 
-  return parts.join(" | ");
+  const detailSuffix = details.length > 0 ? ` (${details.join(", ")})` : "";
+  return `${timeText} [${linkLabel}](${post.url})${detailSuffix}`;
 }
 
 function buildAuthorLabel(post: SocialPost): string {
@@ -107,7 +114,6 @@ export async function writeMarkdownReport(
           contents += `${indentLines(body)}\n`;
         }
       }
-      contents += `${indentLines(`[link](${post.url})`)}\n`;
     }
   }
 

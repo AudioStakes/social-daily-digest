@@ -2,10 +2,10 @@ import type { Page } from "playwright-core";
 import { readFile } from "node:fs/promises";
 
 import { ManualActionRequiredError } from "../errors.js";
-import { getXSnapshotsDirectory } from "../paths.js";
+import { getXSnapshotPath, getXSnapshotsDirectory } from "../paths.js";
 import type { SocialPost } from "../types.js";
 import { dedupePosts, filterRecentPosts } from "./common.js";
-import { ensureDirectory, writeTextFile } from "../util/files.js";
+import { ensureDirectory, pathExists, writeTextFile } from "../util/files.js";
 import { formatDateInTimeZone } from "../util/time.js";
 
 const X_HOME_URL = "https://x.com/home";
@@ -111,6 +111,8 @@ async function collectVisiblePosts(page: Page): Promise<SocialPost[]> {
         const statusLink = article.querySelector(
           'a[href*="/status/"]',
         ) as HTMLAnchorElement | null;
+        const statusHref = statusLink?.getAttribute("href") ?? "";
+        const resolvedStatusUrl = statusHref !== "" ? new URL(statusHref, "https://x.com").href : "";
         const time = article.querySelector("time") as HTMLTimeElement | null;
         const textNodes = Array.from(article.querySelectorAll('[data-testid="tweetText"], div[lang]'))
           .filter((node) => node.closest("article") === article);
@@ -121,7 +123,7 @@ async function collectVisiblePosts(page: Page): Promise<SocialPost[]> {
           article.querySelectorAll('[data-testid="User-Name"] a[href^="/"]'),
         ) as HTMLAnchorElement[];
         const socialContextNode = article.querySelector('[data-testid="socialContext"]');
-        const statusPath = statusLink ? new URL(statusLink.href).pathname : "";
+        const statusPath = resolvedStatusUrl !== "" ? new URL(resolvedStatusUrl).pathname : "";
         const socialContextText = socialContextNode?.textContent?.trim() ?? "";
         const reposter = socialContextText.replace(/\s+reposted$/i, "").trim();
         const userHandles = userLinks
@@ -147,7 +149,7 @@ async function collectVisiblePosts(page: Page): Promise<SocialPost[]> {
           .join("\n")
           .trim();
 
-        const url = statusLink?.href ?? "";
+        const url = resolvedStatusUrl;
         const isRepost = /reposted/i.test(socialContextText);
         const author = isRepost
           ? reposter || authorNode?.textContent?.trim() || "Unknown"
@@ -178,7 +180,7 @@ async function collectVisiblePosts(page: Page): Promise<SocialPost[]> {
 async function saveTimelineSnapshot(posts: SocialPost[], reportDate: string): Promise<string> {
   const snapshotDir = getXSnapshotsDirectory();
   await ensureDirectory(snapshotDir);
-  const snapshotPath = `${snapshotDir}/${reportDate}.html`;
+  const snapshotPath = getXSnapshotPath(reportDate);
   const articleHtml = posts
     .map((post) => post.articleHtml ?? "")
     .filter((value) => value !== "")
@@ -201,6 +203,8 @@ async function parsePostsFromSavedHtml(
         const statusLink = article.querySelector(
           'a[href*="/status/"]',
         ) as HTMLAnchorElement | null;
+        const statusHref = statusLink?.getAttribute("href") ?? "";
+        const resolvedStatusUrl = statusHref !== "" ? new URL(statusHref, "https://x.com").href : "";
         const time = article.querySelector("time") as HTMLTimeElement | null;
         const textNodes = Array.from(article.querySelectorAll('[data-testid="tweetText"], div[lang]'))
           .filter((node) => node.closest("article") === article);
@@ -211,7 +215,7 @@ async function parsePostsFromSavedHtml(
           article.querySelectorAll('[data-testid="User-Name"] a[href^="/"]'),
         ) as HTMLAnchorElement[];
         const socialContextNode = article.querySelector('[data-testid="socialContext"]');
-        const statusPath = statusLink ? new URL(statusLink.href).pathname : "";
+        const statusPath = resolvedStatusUrl !== "" ? new URL(resolvedStatusUrl).pathname : "";
         const socialContextText = socialContextNode?.textContent?.trim() ?? "";
         const reposter = socialContextText.replace(/\s+reposted$/i, "").trim();
         const userHandles = userLinks
@@ -237,7 +241,7 @@ async function parsePostsFromSavedHtml(
           .join("\n")
           .trim();
 
-        const url = statusLink?.href ?? "";
+        const url = resolvedStatusUrl;
         const isRepost = /reposted/i.test(socialContextText);
         const author = isRepost
           ? reposter || authorNode?.textContent?.trim() || "Unknown"
@@ -263,6 +267,124 @@ async function parsePostsFromSavedHtml(
       })
       .filter((post) => post.url !== "");
   }, html);
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#39;", "'");
+}
+
+function stripTags(value: string): string {
+  return decodeHtmlEntities(value.replace(/<[^>]+>/g, " "));
+}
+
+function normalizeWhitespace(value: string): string {
+  return value
+    .replace(/\r/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractMatches(pattern: RegExp, value: string): string[] {
+  return Array.from(value.matchAll(pattern), (match) => match[1] ?? "");
+}
+
+function parsePostsFromSavedHtmlInNode(html: string): SocialPost[] {
+  const articleMatches = html.match(/<article[\s\S]*?<\/article>/g) ?? [];
+
+  return articleMatches
+    .map((articleHtml) => {
+      const statusHref =
+        articleHtml.match(/href="([^"]*\/status\/[^"]+)"/)?.[1] ?? "";
+      const resolvedStatusUrl =
+        statusHref !== "" ? new URL(statusHref, "https://x.com").href : "";
+      const statusPath =
+        resolvedStatusUrl !== "" ? new URL(resolvedStatusUrl).pathname : "";
+      const publishedAtRaw =
+        articleHtml.match(/<time[^>]*datetime="([^"]+)"/)?.[1] ?? null;
+      const publishedAtMs = publishedAtRaw ? Date.parse(publishedAtRaw) : null;
+      const socialContextHtml =
+        articleHtml.match(/data-testid="socialContext"[^>]*>([\s\S]*?)<\/[^>]+>/)?.[1] ?? "";
+      const socialContextText = normalizeWhitespace(stripTags(socialContextHtml));
+      const reposter = socialContextText.replace(/\s+reposted$/i, "").trim();
+      const userHandles = extractMatches(
+        /data-testid="User-Name"[\s\S]*?href="\/([^"/?#]+)"/g,
+        articleHtml,
+      );
+      const dedupedHandles = [...new Set(userHandles)];
+      const authorHandle = dedupedHandles[0] ?? null;
+      const repostedAccount =
+        dedupedHandles.find((handle) => handle !== authorHandle) ??
+        statusPath.split("/")[1] ??
+        "";
+      const authorNameHtml =
+        articleHtml.match(/data-testid="User-Name"[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/)?.[1] ??
+        "";
+      const authorName = normalizeWhitespace(stripTags(authorNameHtml)) || "Unknown";
+      const textParts = extractMatches(
+        /(?:data-testid="tweetText"[^>]*>|<div[^>]*lang="[^"]*"[^>]*>)([\s\S]*?)<\/div>/g,
+        articleHtml,
+      )
+        .map((part) => normalizeWhitespace(stripTags(part)))
+        .filter((part) => part !== "");
+      const isRepost = /reposted/i.test(socialContextText);
+      const hasImage =
+        articleHtml.includes('data-testid="tweetPhoto"') ||
+        articleHtml.includes("pbs.twimg.com/media");
+      const hasVideo =
+        articleHtml.includes('data-testid="videoPlayer"') ||
+        articleHtml.includes("<video");
+
+      return {
+        platform: "x" as const,
+        author: isRepost ? reposter || authorName : authorName,
+        authorHandle,
+        text: isRepost ? "" : textParts.join("\n").trim(),
+        url: resolvedStatusUrl,
+        publishedAtLabel: publishedAtRaw ?? "Unknown time",
+        publishedAtMs: Number.isNaN(publishedAtMs) ? null : publishedAtMs,
+        isRepost,
+        repostedAccount: isRepost && repostedAccount !== "" ? repostedAccount : null,
+        hasImage,
+        hasVideo,
+      };
+    })
+    .filter((post) => post.url !== "");
+}
+
+export async function loadXFeedSnapshot(
+  page: Page,
+  reportDate: string,
+  cutoffMs: number,
+): Promise<SocialPost[] | null> {
+  const snapshotPath = getXSnapshotPath(reportDate);
+  if (!(await pathExists(snapshotPath))) {
+    return null;
+  }
+
+  const snapshotHtml = await readFile(snapshotPath, "utf8");
+  const parsedPosts = await parsePostsFromSavedHtml(page, snapshotHtml);
+  return filterRecentPosts(dedupePosts(parsedPosts), cutoffMs);
+}
+
+export async function loadXFeedSnapshotFromDisk(
+  reportDate: string,
+  cutoffMs: number,
+): Promise<SocialPost[] | null> {
+  const snapshotPath = getXSnapshotPath(reportDate);
+  if (!(await pathExists(snapshotPath))) {
+    return null;
+  }
+
+  const snapshotHtml = await readFile(snapshotPath, "utf8");
+  const parsedPosts = parsePostsFromSavedHtmlInNode(snapshotHtml);
+  return filterRecentPosts(dedupePosts(parsedPosts), cutoffMs);
 }
 
 async function scrollToTimelineBottom(page: Page): Promise<void> {
