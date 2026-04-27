@@ -19,7 +19,8 @@ function isSocialPost(value: unknown): value is SocialPost {
     typeof candidate.text === "string" &&
     typeof candidate.url === "string" &&
     typeof candidate.publishedAtLabel === "string" &&
-    (typeof candidate.publishedAtMs === "number" || candidate.publishedAtMs === null) &&
+    (candidate.publishedAtMs === null ||
+      (typeof candidate.publishedAtMs === "number" && Number.isFinite(candidate.publishedAtMs))) &&
     typeof candidate.isRepost === "boolean" &&
     (typeof candidate.repostedAccount === "string" || candidate.repostedAccount === null) &&
     typeof candidate.hasImage === "boolean" &&

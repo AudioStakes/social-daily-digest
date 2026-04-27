@@ -166,7 +166,12 @@ async function fetchToken(payload: URLSearchParams): Promise<XApiTokenRecord> {
     throw new CliError("Unexpected X API response.");
   }
 
-  const raw = (await response.json()) as Record<string, unknown>;
+  let raw: Record<string, unknown>;
+  try {
+    raw = (await response.json()) as Record<string, unknown>;
+  } catch {
+    throw new CliError("Unexpected X API response.");
+  }
   const accessToken = raw.access_token;
   const refreshToken = raw.refresh_token;
   const expiresIn = raw.expires_in;
