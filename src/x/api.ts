@@ -35,10 +35,41 @@ interface TimelineResponse {
   };
 }
 
-async function requestXApiJson(
-  url: string,
-  accessToken: string,
-): Promise<{ status: number; body: Record<string, unknown> }> {
+class XApiResponseError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: Record<string, unknown> | null,
+  ) {
+    super("Unexpected X API response.");
+    this.name = "XApiResponseError";
+  }
+}
+
+function isStartTimeParameterError(body: Record<string, unknown> | null): boolean {
+  if (!body) {
+    return false;
+  }
+
+  const errors = body.errors;
+  if (!Array.isArray(errors)) {
+    return false;
+  }
+
+  return errors.some((error) => {
+    if (!error || typeof error !== "object") {
+      return false;
+    }
+
+    const parameter = (error as { parameter?: unknown }).parameter;
+    const message = (error as { message?: unknown }).message;
+    return (
+      parameter === "start_time" ||
+      (typeof message === "string" && message.toLowerCase().includes("start_time"))
+    );
+  });
+}
+
+async function requestXApiJson(url: string, accessToken: string): Promise<Record<string, unknown>> {
   let response: Response;
   try {
     response = await fetch(url, {
@@ -58,20 +89,31 @@ async function requestXApiJson(
       'X API access was denied. Confirm the app has tweet.read, users.read, and offline.access scopes, then run "sns-digest x auth login" again.',
     );
   }
+
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await response.json()) as Record<string, unknown>;
+  } catch {
+    body = null;
+  }
+
   if (!response.ok) {
+    throw new XApiResponseError(response.status, body);
+  }
+
+  if (!body || typeof body !== "object") {
     throw new CliError("Unexpected X API response.");
   }
 
-  const data = (await response.json()) as Record<string, unknown>;
-  return { status: response.status, body: data };
+  return body;
 }
 
 async function getAuthenticatedUserId(accessToken: string): Promise<string> {
   const endpoint = new URL(USERS_ME_URL);
   endpoint.searchParams.set("user.fields", "username,name");
-  const response = await requestXApiJson(endpoint.toString(), accessToken);
+  const body = await requestXApiJson(endpoint.toString(), accessToken);
 
-  const user = response.body.data as { id?: unknown } | undefined;
+  const user = body.data as { id?: unknown } | undefined;
   if (!user || typeof user.id !== "string") {
     throw new CliError("Unexpected X API response.");
   }
@@ -146,21 +188,30 @@ export async function fetchXFeedViaApi(
 
     let responseBody: TimelineResponse;
     try {
-      const response = await requestXApiJson(endpoint.toString(), accessToken);
-      responseBody = response.body as TimelineResponse;
+      responseBody = (await requestXApiJson(
+        endpoint.toString(),
+        accessToken,
+      )) as TimelineResponse;
     } catch (error) {
-      const cliError = error instanceof CliError ? error : null;
-      if (cliError?.message === "Unexpected X API response.") {
+      if (
+        error instanceof XApiResponseError &&
+        error.status === 400 &&
+        isStartTimeParameterError(error.body)
+      ) {
         const fallbackEndpoint = new URL(endpoint.toString());
         fallbackEndpoint.searchParams.delete("start_time");
-        const response = await requestXApiJson(fallbackEndpoint.toString(), accessToken);
-        responseBody = response.body as TimelineResponse;
+        responseBody = (await requestXApiJson(
+          fallbackEndpoint.toString(),
+          accessToken,
+        )) as TimelineResponse;
+      } else if (error instanceof XApiResponseError) {
+        throw new CliError("Unexpected X API response.");
       } else {
         throw error;
       }
     }
 
-    const tweets = responseBody.data;
+    const tweets = responseBody.data ?? [];
     if (!Array.isArray(tweets)) {
       throw new CliError("Unexpected X API response.");
     }

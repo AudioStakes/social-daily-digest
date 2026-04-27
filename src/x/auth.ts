@@ -59,6 +59,9 @@ async function waitForAuthCode(callbackUrl: URL, expectedState: string): Promise
   const port = Number(callbackUrl.port || "80");
 
   return await new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
     const server = http.createServer((req, res) => {
       if (!req.url) {
         res.statusCode = 400;
@@ -83,16 +86,38 @@ async function waitForAuthCode(callbackUrl: URL, expectedState: string): Promise
 
       res.statusCode = 200;
       res.end("X API authentication succeeded. You can close this tab.");
-      server.close();
-      resolve(code);
+
+      if (!settled) {
+        settled = true;
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        server.close();
+        resolve(code);
+      }
     });
 
     server.once("error", (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
       reject(error);
     });
 
     server.listen(port, callbackUrl.hostname, () => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
         server.close();
         reject(new CliError("Timed out waiting for OAuth callback."));
       }, 180_000);

@@ -101,6 +101,21 @@ test("filters old posts and dedupes by URL", async () => {
   assert.equal(recent[0].url, "https://x.com/alice/status/1");
 });
 
+
+test("handles empty timeline response", async () => {
+  mockFetch(async (input) => {
+    const url = String(input);
+    if (url.includes("/users/me")) {
+      return new Response(JSON.stringify({ data: { id: "u1" } }), { status: 200 });
+    }
+
+    return new Response(JSON.stringify({ meta: { result_count: 0 } }), { status: 200 });
+  });
+
+  const posts = await fetchXFeedViaApi("token", Date.parse("2026-04-27T00:00:00.000Z"));
+  assert.equal(posts.length, 0);
+});
+
 test("maps 429/401/403 to readable errors", async () => {
   for (const status of [429, 401, 403]) {
     mockFetch(async () => new Response("{}", { status }));
