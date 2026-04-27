@@ -3,7 +3,7 @@
 ## Purpose
 
 This repository contains a macOS-only local CLI tool named `sns-digest`.
-It crawls X and Facebook with a dedicated Google Chrome profile, stores
+It fetches the X home timeline via X API v2, stores
 credentials in macOS Keychain, writes a daily Markdown report, and integrates
 with `launchd`.
 
@@ -21,7 +21,7 @@ with `launchd`.
 ## Implementation Notes
 
 * Runtime: Node.js + TypeScript
-* Browser automation: Playwright with the local Google Chrome executable
+* X integration: X API v2 (OAuth 2.0 PKCE + refresh token)
 * macOS integrations: `security`, `osascript`, `open`, and `launchctl`
 * Config format: YAML in `config/settings.yaml`
 

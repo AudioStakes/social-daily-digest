@@ -52,7 +52,7 @@ export function getXSnapshotsDirectory(): string {
 }
 
 export function getXSnapshotPath(reportDate: string): string {
-  return path.join(getXSnapshotsDirectory(), `${reportDate}.html`);
+  return path.join(getXSnapshotsDirectory(), `${reportDate}.json`);
 }
 
 export function getLogsDirectory(): string {

@@ -29,16 +29,42 @@ email:
 
 x:
   account_name: ""
+  api:
+    client_id: ""
+    callback_url: "http://127.0.0.1:8787/callback"
 `;
 
-function normalizePlatformConfig(value: unknown): { account_name: string } {
+function normalizePlatformConfig(value: unknown): AppSettings["x"] {
   if (!value || typeof value !== "object") {
-    return { account_name: "" };
+    return {
+      account_name: "",
+      api: {
+        client_id: "",
+        callback_url: "http://127.0.0.1:8787/callback",
+      },
+    };
   }
 
   const accountName = (value as { account_name?: unknown }).account_name;
+  const apiValue = (value as { api?: unknown }).api;
+  const clientId =
+    apiValue && typeof apiValue === "object"
+      ? (apiValue as { client_id?: unknown }).client_id
+      : undefined;
+  const callbackUrl =
+    apiValue && typeof apiValue === "object"
+      ? (apiValue as { callback_url?: unknown }).callback_url
+      : undefined;
+
   return {
     account_name: typeof accountName === "string" ? accountName.trim() : "",
+    api: {
+      client_id: typeof clientId === "string" ? clientId.trim() : "",
+      callback_url:
+        typeof callbackUrl === "string" && callbackUrl.trim() !== ""
+          ? callbackUrl.trim()
+          : "http://127.0.0.1:8787/callback",
+    },
   };
 }
 
