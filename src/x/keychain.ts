@@ -33,6 +33,33 @@ export async function saveXApiTokenRecord(
   }
 }
 
+function validateTokenRecord(raw: unknown): XApiTokenRecord {
+  if (!raw || typeof raw !== "object") {
+    throw new CliError(
+      'Stored X API token is invalid. Run "sns-digest x auth login" again.',
+    );
+  }
+
+  const parsed = raw as Partial<XApiTokenRecord>;
+  if (
+    typeof parsed.accessToken !== "string" ||
+    parsed.accessToken.trim() === "" ||
+    typeof parsed.refreshToken !== "string" ||
+    typeof parsed.expiresAtMs !== "number" ||
+    !Number.isFinite(parsed.expiresAtMs)
+  ) {
+    throw new CliError(
+      'Stored X API token is invalid. Run "sns-digest x auth login" again.',
+    );
+  }
+
+  return {
+    accessToken: parsed.accessToken,
+    refreshToken: parsed.refreshToken,
+    expiresAtMs: parsed.expiresAtMs,
+  };
+}
+
 export async function getXApiTokenRecord(
   accountName: string,
 ): Promise<XApiTokenRecord | null> {
@@ -57,22 +84,15 @@ export async function getXApiTokenRecord(
   }
 
   try {
-    const parsed = JSON.parse(result.stdout) as Partial<XApiTokenRecord>;
-    if (
-      typeof parsed.accessToken !== "string" ||
-      typeof parsed.refreshToken !== "string" ||
-      typeof parsed.expiresAtMs !== "number"
-    ) {
-      throw new Error("invalid shape");
+    return validateTokenRecord(JSON.parse(result.stdout));
+  } catch (error) {
+    if (error instanceof CliError) {
+      throw error;
     }
 
-    return {
-      accessToken: parsed.accessToken,
-      refreshToken: parsed.refreshToken,
-      expiresAtMs: parsed.expiresAtMs,
-    };
-  } catch {
-    throw new CliError("Unexpected X API response.");
+    throw new CliError(
+      'Stored X API token is invalid. Run "sns-digest x auth login" again.',
+    );
   }
 }
 

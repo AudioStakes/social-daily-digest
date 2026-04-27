@@ -14,6 +14,7 @@ import {
 const X_AUTH_URL = "https://twitter.com/i/oauth2/authorize";
 const X_TOKEN_URL = "https://api.x.com/2/oauth2/token";
 const REQUIRED_SCOPES = ["tweet.read", "users.read", "offline.access"];
+const CALLBACK_TIMEOUT_MS = 180_000;
 
 function assertXApiConfig(settings: AppSettings): void {
   if (settings.x.account_name === "") {
@@ -38,6 +39,12 @@ function generatePkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
+function getInvalidCallbackError(): CliError {
+  return new CliError(
+    'Set "x.api.callback_url" to a local callback URL with an explicit non-privileged port, such as "http://127.0.0.1:8787/callback".',
+  );
+}
+
 function parseCallbackUrl(callbackUrl: string): URL {
   let url: URL;
   try {
@@ -47,20 +54,41 @@ function parseCallbackUrl(callbackUrl: string): URL {
   }
 
   if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) {
-    throw new CliError(
-      'Use a local callback URL such as "http://127.0.0.1:8787/callback" in x.api.callback_url.',
-    );
+    throw getInvalidCallbackError();
+  }
+
+  if (url.port === "") {
+    throw getInvalidCallbackError();
+  }
+
+  const port = Number(url.port);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw getInvalidCallbackError();
   }
 
   return url;
 }
 
 async function waitForAuthCode(callbackUrl: URL, expectedState: string): Promise<string> {
-  const port = Number(callbackUrl.port || "80");
+  const port = Number(callbackUrl.port);
 
   return await new Promise((resolve, reject) => {
     let settled = false;
     let timeoutHandle: NodeJS.Timeout | null = null;
+
+    const finalize = (fn: () => void): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
+      server.close();
+      fn();
+    };
 
     const server = http.createServer((req, res) => {
       if (!req.url) {
@@ -86,43 +114,28 @@ async function waitForAuthCode(callbackUrl: URL, expectedState: string): Promise
 
       res.statusCode = 200;
       res.end("X API authentication succeeded. You can close this tab.");
-
-      if (!settled) {
-        settled = true;
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = null;
-        }
-        server.close();
-        resolve(code);
-      }
+      finalize(() => resolve(code));
     });
 
     server.once("error", (error) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-        timeoutHandle = null;
-      }
-      reject(error);
+      finalize(() => reject(error));
     });
 
     server.listen(port, callbackUrl.hostname, () => {
       timeoutHandle = setTimeout(() => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        server.close();
-        reject(new CliError("Timed out waiting for OAuth callback."));
-      }, 180_000);
+        finalize(() => reject(new CliError("Timed out waiting for OAuth callback.")));
+      }, CALLBACK_TIMEOUT_MS);
     });
   });
+}
+
+function buildRateLimitError(response: Response): CliError {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter && retryAfter.trim() !== "") {
+    return new CliError(`X API rate limit exceeded. Retry after ${retryAfter} seconds.`);
+  }
+
+  return new CliError("X API rate limit exceeded. Wait a bit and try again.");
 }
 
 async function fetchToken(payload: URLSearchParams): Promise<XApiTokenRecord> {
@@ -137,6 +150,10 @@ async function fetchToken(payload: URLSearchParams): Promise<XApiTokenRecord> {
     });
   } catch {
     throw new CliError("Network error while calling X API.");
+  }
+
+  if (response.status === 429) {
+    throw buildRateLimitError(response);
   }
 
   if (response.status === 401 || response.status === 403) {
@@ -156,7 +173,9 @@ async function fetchToken(payload: URLSearchParams): Promise<XApiTokenRecord> {
 
   if (
     typeof accessToken !== "string" ||
+    accessToken.trim() === "" ||
     typeof refreshToken !== "string" ||
+    refreshToken.trim() === "" ||
     typeof expiresIn !== "number"
   ) {
     throw new CliError("Unexpected X API response.");
@@ -245,6 +264,12 @@ export async function getValidXAccessToken(settings: AppSettings): Promise<strin
     return token.accessToken;
   }
 
+  if (token.refreshToken.trim() === "") {
+    throw new CliError(
+      'X API token refresh failed. Run "sns-digest x auth login" again.',
+    );
+  }
+
   try {
     const refreshed = await fetchToken(
       new URLSearchParams({
@@ -256,7 +281,11 @@ export async function getValidXAccessToken(settings: AppSettings): Promise<strin
     await saveXApiTokenRecord(settings.x.account_name, refreshed);
     return refreshed.accessToken;
   } catch (error) {
-    if (error instanceof CliError && error.message.includes("X API access was denied")) {
+    if (
+      error instanceof CliError &&
+      (error.message.includes("X API access was denied") ||
+        error.message.includes("X API rate limit exceeded"))
+    ) {
       throw error;
     }
 

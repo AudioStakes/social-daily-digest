@@ -101,7 +101,6 @@ test("filters old posts and dedupes by URL", async () => {
   assert.equal(recent[0].url, "https://x.com/alice/status/1");
 });
 
-
 test("handles empty timeline response", async () => {
   mockFetch(async (input) => {
     const url = String(input);
@@ -114,6 +113,52 @@ test("handles empty timeline response", async () => {
 
   const posts = await fetchXFeedViaApi("token", Date.parse("2026-04-27T00:00:00.000Z"));
   assert.equal(posts.length, 0);
+});
+
+test("retries once without start_time only when API reports start_time parameter error", async () => {
+  let timelineCalls = 0;
+  mockFetch(async (input) => {
+    const url = String(input);
+    if (url.includes("/users/me")) {
+      return new Response(JSON.stringify({ data: { id: "u1" } }), { status: 200 });
+    }
+
+    timelineCalls += 1;
+    if (timelineCalls === 1) {
+      return new Response(
+        JSON.stringify({
+          errors: [{ parameter: "start_time", message: "start_time is invalid" }],
+        }),
+        { status: 400 },
+      );
+    }
+
+    assert.equal(url.includes("start_time="), false);
+    return new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 });
+  });
+
+  const posts = await fetchXFeedViaApi("token", Date.parse("2026-04-27T00:00:00.000Z"));
+  assert.equal(posts.length, 0);
+  assert.equal(timelineCalls, 2);
+});
+
+test("does not silently retry for unrelated 400 errors", async () => {
+  mockFetch(async (input) => {
+    const url = String(input);
+    if (url.includes("/users/me")) {
+      return new Response(JSON.stringify({ data: { id: "u1" } }), { status: 200 });
+    }
+
+    return new Response(JSON.stringify({ errors: [{ parameter: "max_results" }] }), {
+      status: 400,
+    });
+  });
+
+  await assert.rejects(fetchXFeedViaApi("token", Date.now()), (error: unknown) => {
+    assert.ok(error instanceof CliError);
+    assert.equal(error.message, "Unexpected X API response.");
+    return true;
+  });
 });
 
 test("maps 429/401/403 to readable errors", async () => {

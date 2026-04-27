@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 
-import { CliError } from "../errors.js";
 import { getXSnapshotPath, getXSnapshotsDirectory } from "../paths.js";
 import type { SocialPost } from "../types.js";
 import { ensureDirectory, pathExists, writeTextFile } from "../util/files.js";
@@ -47,11 +46,13 @@ export async function loadXFeedSnapshotFromDisk(
   try {
     parsed = JSON.parse(await readFile(snapshotPath, "utf8"));
   } catch {
-    throw new CliError("Unexpected X API response.");
+    console.warn(`Ignoring invalid X snapshot at ${snapshotPath}. Fetching fresh API data.`);
+    return null;
   }
 
   if (!Array.isArray(parsed) || !parsed.every(isSocialPost)) {
-    throw new CliError("Unexpected X API response.");
+    console.warn(`Ignoring malformed X snapshot at ${snapshotPath}. Fetching fresh API data.`);
+    return null;
   }
 
   return filterRecentPosts(dedupePosts(parsed), cutoffMs);
