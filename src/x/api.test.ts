@@ -27,16 +27,20 @@ test("maps timeline response to SocialPost and media flags", async () => {
             text: "hello",
             author_id: "u1",
             created_at: nowIso,
-            referenced_tweets: [{ type: "retweeted" }],
+            referenced_tweets: [{ type: "retweeted", id: "rt1" }],
             attachments: { media_keys: ["m1", "m2"] },
           },
         ],
         includes: {
-          users: [{ id: "u1", username: "alice", name: "Alice" }],
+          users: [
+            { id: "u1", username: "alice", name: "Alice" },
+            { id: "u2", username: "bob", name: "Bob" },
+          ],
           media: [
             { media_key: "m1", type: "photo" },
             { media_key: "m2", type: "video" },
           ],
+          tweets: [{ id: "rt1", author_id: "u2" }],
         },
         meta: {},
       }),
@@ -50,6 +54,7 @@ test("maps timeline response to SocialPost and media flags", async () => {
   assert.equal(posts[0].isRepost, true);
   assert.equal(posts[0].hasImage, true);
   assert.equal(posts[0].hasVideo, true);
+  assert.equal(posts[0].repostedAccount, "bob");
 });
 
 test("filters old posts and dedupes by URL", async () => {
@@ -159,6 +164,40 @@ test("does not silently retry for unrelated 400 errors", async () => {
     assert.equal(error.message, "Unexpected X API response.");
     return true;
   });
+});
+
+
+
+test("handles malformed includes values without crashing", async () => {
+  mockFetch(async (input) => {
+    const url = String(input);
+    if (url.includes("/users/me")) {
+      return new Response(JSON.stringify({ data: { id: "u1" } }), { status: 200 });
+    }
+
+    return new Response(
+      JSON.stringify({
+        data: [
+          {
+            id: "t1",
+            text: "hello",
+            author_id: "u1",
+            created_at: "2026-04-27T12:00:00.000Z",
+          },
+        ],
+        includes: {
+          users: { bad: true },
+          media: null,
+          tweets: "oops",
+        },
+      }),
+      { status: 200 },
+    );
+  });
+
+  const posts = await fetchXFeedViaApi("token", Date.parse("2026-04-27T00:00:00.000Z"));
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].author, "Unknown");
 });
 
 test("maps 429/401/403 to readable errors", async () => {

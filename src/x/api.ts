@@ -20,7 +20,7 @@ interface XTweet {
   text?: string;
   author_id?: string;
   created_at?: string;
-  referenced_tweets?: Array<{ type?: string }>;
+  referenced_tweets?: Array<{ type?: string; id?: string }>;
   attachments?: { media_keys?: string[] };
 }
 
@@ -29,6 +29,7 @@ interface TimelineResponse {
   includes?: {
     users?: XUser[];
     media?: XMedia[];
+    tweets?: XTweet[];
   };
   meta?: {
     next_token?: string;
@@ -125,6 +126,7 @@ function mapTweetToSocialPost(
   tweet: XTweet,
   usersById: Map<string, XUser>,
   mediaByKey: Map<string, XMedia>,
+  tweetsById: Map<string, XTweet>,
 ): SocialPost {
   const author = tweet.author_id ? usersById.get(tweet.author_id) : undefined;
   const authorName = author?.name?.trim() || "Unknown";
@@ -135,6 +137,17 @@ function mapTweetToSocialPost(
   const mediaTypes = mediaKeys
     .map((mediaKey) => mediaByKey.get(mediaKey)?.type)
     .filter((type): type is string => typeof type === "string");
+  const isRepost = (tweet.referenced_tweets ?? []).some(
+    (reference) => reference.type === "retweeted",
+  );
+  const repostedTweetId = (tweet.referenced_tweets ?? []).find(
+    (reference) => reference.type === "retweeted" && typeof reference.id === "string",
+  )?.id;
+  const repostedTweet = repostedTweetId ? tweetsById.get(repostedTweetId) : undefined;
+  const repostedAuthorId = repostedTweet?.author_id;
+  const repostedAuthorHandle = repostedAuthorId
+    ? usersById.get(repostedAuthorId)?.username ?? null
+    : null;
 
   return {
     platform: "x",
@@ -146,10 +159,8 @@ function mapTweetToSocialPost(
       : `https://x.com/i/web/status/${tweet.id}`,
     publishedAtLabel: createdAt ?? "",
     publishedAtMs: Number.isNaN(publishedAtMs) ? null : publishedAtMs,
-    isRepost: (tweet.referenced_tweets ?? []).some(
-      (reference) => reference.type === "retweeted",
-    ),
-    repostedAccount: null,
+    isRepost,
+    repostedAccount: isRepost ? repostedAuthorHandle : null,
     hasImage: mediaTypes.some((type) => type === "photo"),
     hasVideo: mediaTypes.some((type) => type === "video" || type === "animated_gif"),
   };
@@ -164,6 +175,7 @@ export async function fetchXFeedViaApi(
   const posts: SocialPost[] = [];
   let paginationToken: string | null = null;
   let shouldContinue = true;
+  let useStartTime = true;
 
   while (shouldContinue) {
     const endpoint = new URL(
@@ -180,7 +192,9 @@ export async function fetchXFeedViaApi(
     );
     endpoint.searchParams.set("user.fields", "username,name");
     endpoint.searchParams.set("media.fields", "type,url,preview_image_url");
-    endpoint.searchParams.set("start_time", new Date(cutoffMs).toISOString());
+    if (useStartTime) {
+      endpoint.searchParams.set("start_time", new Date(cutoffMs).toISOString());
+    }
 
     if (paginationToken) {
       endpoint.searchParams.set("pagination_token", paginationToken);
@@ -196,8 +210,10 @@ export async function fetchXFeedViaApi(
       if (
         error instanceof XApiResponseError &&
         error.status === 400 &&
+        useStartTime &&
         isStartTimeParameterError(error.body)
       ) {
+        useStartTime = false;
         const fallbackEndpoint = new URL(endpoint.toString());
         fallbackEndpoint.searchParams.delete("start_time");
         responseBody = (await requestXApiJson(
@@ -216,15 +232,30 @@ export async function fetchXFeedViaApi(
       throw new CliError("Unexpected X API response.");
     }
 
+    const includedUsers = Array.isArray(responseBody.includes?.users)
+      ? responseBody.includes.users
+      : [];
+    const includedMedia = Array.isArray(responseBody.includes?.media)
+      ? responseBody.includes.media
+      : [];
+    const includedTweets = Array.isArray(responseBody.includes?.tweets)
+      ? responseBody.includes.tweets
+      : [];
+
     const usersById = new Map(
-      (responseBody.includes?.users ?? [])
+      includedUsers
         .filter((user) => typeof user.id === "string")
         .map((user) => [user.id, user] as const),
     );
     const mediaByKey = new Map(
-      (responseBody.includes?.media ?? [])
+      includedMedia
         .filter((media) => typeof media.media_key === "string")
         .map((media) => [media.media_key, media] as const),
+    );
+    const tweetsById = new Map(
+      includedTweets
+        .filter((includedTweet) => typeof includedTweet.id === "string")
+        .map((includedTweet) => [includedTweet.id, includedTweet] as const),
     );
 
     for (const tweet of tweets) {
@@ -232,7 +263,7 @@ export async function fetchXFeedViaApi(
         throw new CliError("Unexpected X API response.");
       }
 
-      const post = mapTweetToSocialPost(tweet, usersById, mediaByKey);
+      const post = mapTweetToSocialPost(tweet, usersById, mediaByKey, tweetsById);
       if (post.publishedAtMs !== null && post.publishedAtMs < cutoffMs) {
         shouldContinue = false;
         continue;

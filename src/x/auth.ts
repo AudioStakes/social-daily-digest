@@ -281,11 +281,7 @@ export async function getValidXAccessToken(settings: AppSettings): Promise<strin
     await saveXApiTokenRecord(settings.x.account_name, refreshed);
     return refreshed.accessToken;
   } catch (error) {
-    if (
-      error instanceof CliError &&
-      (error.message.includes("X API access was denied") ||
-        error.message.includes("X API rate limit exceeded"))
-    ) {
+    if (error instanceof CliError) {
       throw error;
     }
 
