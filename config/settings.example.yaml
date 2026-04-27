@@ -1,10 +1,6 @@
 app:
   timezone: Asia/Tokyo
 
-browser:
-  user_data_dir: "/Users/<you>/Library/Application Support/Google/Chrome"
-  profile_directory: "Default"
-
 schedule:
   notify_at: "08:00"
 
@@ -13,3 +9,6 @@ email:
 
 x:
   account_name: ""
+  api:
+    client_id: ""
+    callback_url: "http://127.0.0.1:8787/callback"

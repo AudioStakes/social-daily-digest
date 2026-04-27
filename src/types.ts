@@ -1,7 +1,13 @@
 export type PlatformName = "x";
 
+export interface XApiConfig {
+  client_id: string;
+  callback_url: string;
+}
+
 export interface PlatformConfig {
   account_name: string;
+  api: XApiConfig;
 }
 
 export interface AppSettings {

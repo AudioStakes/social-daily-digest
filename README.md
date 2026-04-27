@@ -2,16 +2,16 @@
 
 `social-daily-digest` is a **macOS-only local CLI** that checks X once per day, writes a Markdown digest report, and can optionally email that report to your own iCloud address.
 
-The tool is intentionally scoped for a single local user with macOS-native integrations (`security`, `osascript`, `open`, `launchctl`) and Google Chrome profile reuse.
+The tool is intentionally scoped for a single local user with macOS-native integrations (`security`, `osascript`, `open`, `launchctl`).
 
 ## MVP Scope
 
 ### In scope
 
 - Local-only execution on macOS.
-- Crawling X with Playwright using local Google Chrome.
-- Manual-first login with session reuse via an existing local Google Chrome profile (or an optional dedicated profile).
-- Optional storage of platform credentials in macOS Keychain for future compatibility.
+- Fetching the authenticated user's X home timeline via X API v2.
+- OAuth 2.0 Authorization Code + PKCE login from local CLI.
+- Refresh-token based token renewal (stored in macOS Keychain only).
 - Generating a daily Markdown report at `reports/YYYY-MM-DD.md`.
 - Optional self-email delivery of the generated report when configured.
 - Daily scheduling through `launchd`.
@@ -20,13 +20,13 @@ The tool is intentionally scoped for a single local user with macOS-native integ
 
 - Non-macOS support.
 - Cloud-hosted crawling, storage, or notifications.
-- Browser engines other than local Google Chrome.
+- DOM scraping, browser automation, or login bypass.
 
 ## Requirements
 
 - macOS
 - Node.js 20+
-- Google Chrome installed in the standard macOS Applications path
+- X Developer App (OAuth 2.0 enabled)
 
 ## Setup
 
@@ -34,18 +34,7 @@ The tool is intentionally scoped for a single local user with macOS-native integ
 npm install
 npm run build
 npm link
-```
-
-Initialize local directories and create starter config:
-
-```bash
 sns-digest init
-```
-
-No-link alternative for local development:
-
-```bash
-node dist/main.js init
 ```
 
 ## Configuration
@@ -56,10 +45,6 @@ Main config file: `config/settings.yaml`
 app:
   timezone: Asia/Tokyo
 
-browser:
-  user_data_dir: "/Users/<you>/Library/Application Support/Google/Chrome"
-  profile_directory: "Default"
-
 schedule:
   notify_at: "08:00"
 
@@ -68,58 +53,42 @@ email:
 
 x:
   account_name: ""
+  api:
+    client_id: ""
+    callback_url: "http://127.0.0.1:8787/callback"
 ```
 
-`sns-digest init` lists local Chrome profiles (`Default`, `Profile 1`, etc.) and lets you choose one. Selecting an existing profile allows reuse of already logged-in X sessions. A dedicated `browser_profiles/chrome` option remains available as a safer fallback.
+- `x.account_name` is the Keychain account label used to store X API tokens.
+- `x.api.client_id` is your X OAuth 2.0 client ID.
+- `x.api.callback_url` should match your X app callback URL (public client + PKCE; no client secret required).
 
-If the selected profile is already open in normal Google Chrome, `sns-digest run` creates a persistent social-daily-digest mirror of that profile under `browser_profiles/managed/` and launches Chrome from the mirror. That means you can complete login once in the `sns-digest` window and reuse that session on later runs without touching the live Chrome profile.
+## X API Authentication (PKCE)
 
-### Email setting behavior
+Configure your X Developer app with these scopes:
 
-The email setting must be exactly:
+- `tweet.read`
+- `users.read`
+- `offline.access`
 
-```yaml
-email:
-  address: "your-address@icloud.com"
+Then authenticate:
+
+```bash
+sns-digest x auth login
 ```
 
-- If `email.address` is empty, email delivery is skipped.
-- If `email.address` is set, `sns-digest run` sends the generated report to that same address.
-- The same address is used as SMTP username, sender (`from`), and recipient (`to`).
-- SMTP details are fixed internally for iCloud Mail (`smtp.mail.me.com:587`, STARTTLS).
-- No additional email YAML fields are required or used.
+Useful auth commands:
+
+```bash
+sns-digest x auth status
+sns-digest x auth logout
+```
 
 ## Credentials and Security
 
-### SNS credentials
-
-X login is handled manually inside the opened Google Chrome window.
-
-You can still store an X password in macOS Keychain as **optional / reserved for future compatibility**, but the crawler does **not** auto-type this value into login forms:
-
-```bash
-sns-digest credentials set x
-```
-
-### Email credential (Apple app-specific password)
-
-For iCloud Mail SMTP, create an **Apple app-specific password** and store it via CLI:
-
-```bash
-sns-digest email credentials set
-```
-
-- Do **not** use your normal Apple Account password.
-- The app-specific password is stored only in macOS Keychain.
-- Keychain service name: `social-daily-digest:email`
-- Keychain account name: `email.address`
-
-### Security requirements
-
-- Do not store SNS or email passwords in YAML, `.env`, SQLite, logs, reports, or source code.
-- Email password must be stored only in macOS Keychain.
-- Do not print Keychain secret values.
-- The crawler does not bypass MFA, passkeys, CAPTCHA, suspicious login checks, or account verification. Complete those steps manually in Chrome when prompted.
+- X API `access_token` / `refresh_token` / expiration are stored only in macOS Keychain.
+- X API tokens are never written to YAML, `.env`, logs, SQLite, reports, or source code.
+- Email app-specific password is stored only in macOS Keychain.
+- `sns-digest credentials set x` remains separate (legacy SNS password storage) and is not used for X API auth.
 
 ## CLI Commands
 
@@ -128,50 +97,30 @@ sns-digest init
 sns-digest credentials set x
 sns-digest credentials show
 sns-digest credentials delete x
+sns-digest x auth login
+sns-digest x auth status
+sns-digest x auth logout
 sns-digest email credentials set
 sns-digest email credentials show
 sns-digest email credentials delete
 sns-digest email test
-sns-digest browser profiles
 sns-digest run
 sns-digest schedule install
 sns-digest schedule uninstall
 sns-digest schedule show
 ```
 
-### Email commands
-
-- `sns-digest email credentials set`
-  - Reads `email.address` from `config/settings.yaml`
-  - Prompts for the iCloud app-specific password with hidden input
-  - Stores password in macOS Keychain
-- `sns-digest email credentials show`
-  - Prints only configured/not configured status
-  - Never prints the password
-- `sns-digest email credentials delete`
-  - Deletes the stored Keychain password for configured `email.address`
-- `sns-digest email test`
-  - Sends a test email to `email.address` from `email.address`
-
 ## Runtime behavior (`sns-digest run`)
 
-1. Open X in the configured Chrome profile from `config/settings.yaml`.
-2. Reuse any existing logged-in session from that chosen profile.
-3. If X is logged out, show a macOS dialog asking for manual login in the opened Chrome window.
-4. After you click **OK**, navigate again to the platform home/feed and verify login state.
-5. Continue crawling only when login is confirmed; otherwise fail with a clear manual-login-required error.
-6. Crawl X.
-7. Generate `reports/YYYY-MM-DD.md`.
-8. If `email.address` is set, send the report by email with subject `[Social Daily Digest] YYYY-MM-DD` and plain-text body equal to the Markdown report content.
-9. Show the existing macOS completion dialog.
+1. Load settings and runtime directories.
+2. Reuse same-day JSON snapshot if available (`data/x_snapshots/YYYY-MM-DD.json`).
+3. Read X API token from Keychain and refresh if expired.
+4. Fetch authenticated user's home timeline via X API v2 (`users/me`, `reverse_chronological`).
+5. Normalize to `SocialPost[]`, dedupe, and keep only the last 24 hours.
+6. Generate `reports/YYYY-MM-DD.md`.
+7. If `email.address` is set, send the report via iCloud SMTP.
 
-### Browser profile discovery command
-
-Use this safe command to list detected local Chrome profiles without launching Chrome:
-
-```bash
-sns-digest browser profiles
-```
+> Note: Home timeline API returns the authenticated user's home timeline and is not guaranteed to be a complete archive of every followed account's posts.
 
 ## Scheduling
 
@@ -192,12 +141,3 @@ Show current status:
 ```bash
 sns-digest schedule show
 ```
-
-## MVP Acceptance Criteria
-
-- `sns-digest init` creates local workspace/config.
-- `sns-digest run` generates a deterministic daily Markdown report.
-- Optional email delivery succeeds when `email.address` is configured and a Keychain credential exists.
-- Email delivery is skipped cleanly when `email.address` is empty.
-- All credentials remain in macOS Keychain only.
-- Scheduling works through `launchd`.

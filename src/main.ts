@@ -1,30 +1,19 @@
 #!/usr/bin/env node
 
 import path from "node:path";
-import readline from "node:readline/promises";
-
-import type { BrowserContext, Page } from "playwright-core";
 
 import {
   deleteCredential,
   hasCredential,
   setCredential,
 } from "./auth/keychain.js";
-import { launchChrome } from "./browser/chrome.js";
-import {
-  assertConfiguredProfileExists,
-  discoverChromeProfiles,
-  getDedicatedProfileLabel,
-  resolveBrowserLaunchConfig,
-  saveBrowserProfileSelection,
-} from "./browser/profiles.js";
 import {
   ensureRuntimeDirectories,
   getAccountName,
   initializeWorkspace,
   loadSettings,
 } from "./config/settings.js";
-import { crawlXFeed, loadXFeedSnapshotFromDisk } from "./crawler/x.js";
+import { fetchAndSaveXFeedSnapshot, loadXFeedSnapshotFromDisk } from "./crawler/x.js";
 import {
   deleteEmailCredential,
   hasEmailCredential,
@@ -38,11 +27,16 @@ import {
 } from "./email/smtp.js";
 import { CliError, ManualActionRequiredError } from "./errors.js";
 import { promptHidden } from "./macos/prompt.js";
-import { getChromeProfilePath, getChromeUserDataDir } from "./paths.js";
 import { writeMarkdownReport } from "./report/markdown.js";
 import { getScheduleStatus, installSchedule, uninstallSchedule } from "./schedule/launchd.js";
-import type { PlatformName, SocialPost } from "./types.js";
+import type { PlatformName } from "./types.js";
 import { formatDateInTimeZone } from "./util/time.js";
+import {
+  getValidXAccessToken,
+  runXAuthLogin,
+  runXAuthLogout,
+  runXAuthStatus,
+} from "./x/auth.js";
 
 function printUsage(): void {
   console.log(`sns-digest
@@ -52,11 +46,13 @@ Commands:
   sns-digest credentials set x
   sns-digest credentials show
   sns-digest credentials delete x
+  sns-digest x auth login
+  sns-digest x auth status
+  sns-digest x auth logout
   sns-digest email credentials set
   sns-digest email credentials show
   sns-digest email credentials delete
   sns-digest email test
-  sns-digest browser profiles
   sns-digest run
   sns-digest schedule install
   sns-digest schedule uninstall
@@ -74,84 +70,11 @@ function parsePlatform(value: string | undefined): PlatformName {
 
 async function runInit(): Promise<void> {
   const result = await initializeWorkspace();
-  const profiles = await discoverChromeProfiles();
-  const dedicatedOptionLabel = getDedicatedProfileLabel();
-  const options = [
-    ...profiles.map((profile) => profile.profileDirectory),
-    dedicatedOptionLabel,
-  ];
-
-  console.log("Available Chrome profiles:");
-  console.log("");
-  profiles.forEach((profile, index) => {
-    const label =
-      profile.displayName === profile.profileDirectory
-        ? profile.profileDirectory
-        : `${profile.displayName} (${profile.profileDirectory})`;
-    console.log(`${index + 1}. ${label}`);
-  });
-  console.log(`${options.length}. ${dedicatedOptionLabel}`);
-  console.log("");
-
-  let selected = 1;
-  if (process.stdin.isTTY && process.stdout.isTTY) {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    const answer = await rl.question(
-      "? Which Chrome profile should social-daily-digest use? [1]: ",
-    );
-    rl.close();
-
-    const normalized = answer.trim();
-    if (normalized !== "") {
-      const parsed = Number(normalized);
-      if (!Number.isInteger(parsed) || parsed < 1 || parsed > options.length) {
-        throw new CliError(`Invalid profile selection "${normalized}".`);
-      }
-
-      selected = parsed;
-    }
-  } else {
-    console.log("TTY not available. Defaulting to option 1.");
-  }
-
-  const selectedOption = options[selected - 1];
-  const selectedProfileDirectory =
-    selectedOption === dedicatedOptionLabel ? null : selectedOption;
-  await saveBrowserProfileSelection(selectedProfileDirectory);
-
   console.log(
     result.createdConfig
       ? "Initialized config/settings.yaml and local directories."
       : "Local directories are ready. config/settings.yaml already exists.",
   );
-  if (selectedProfileDirectory) {
-    console.log(
-      `Configured Chrome profile: ${selectedProfileDirectory} (${getChromeUserDataDir()})`,
-    );
-  } else {
-    console.log("Configured dedicated Chrome profile: browser_profiles/chrome");
-  }
-}
-
-async function runBrowserProfiles(): Promise<void> {
-  const profiles = await discoverChromeProfiles();
-  console.log("Available Chrome profiles:");
-
-  if (profiles.length === 0) {
-    console.log("- (none detected)");
-    return;
-  }
-
-  for (const profile of profiles) {
-    const label =
-      profile.displayName === profile.profileDirectory
-        ? profile.profileDirectory
-        : `${profile.displayName} (${profile.profileDirectory})`;
-    console.log(`- ${label}`);
-  }
 }
 
 async function runCredentialSet(platform: PlatformName): Promise<void> {
@@ -171,7 +94,7 @@ async function runCredentialSet(platform: PlatformName): Promise<void> {
 
   await setCredential(platform, accountName, password);
   console.log(
-    `${platform} credential stored in macOS Keychain (optional; crawler uses manual login in Chrome).`,
+    `${platform} credential stored in macOS Keychain (optional; X API authentication uses \"sns-digest x auth login\").`,
   );
 }
 
@@ -285,47 +208,17 @@ async function runCrawler(): Promise<void> {
     return;
   }
 
-  const posts: SocialPost[] = [];
-  let context: BrowserContext | null = null;
-
-  try {
-    const launchConfig = resolveBrowserLaunchConfig(settings, getChromeProfilePath());
-    if (launchConfig.usingDedicatedProfile) {
-      console.log("Using dedicated Chrome profile: browser_profiles/chrome");
-    } else {
-      await assertConfiguredProfileExists(settings);
-      console.log(`Using Chrome profile: ${launchConfig.profileDirectory}`);
-      console.log(
-        "Using a persistent social-daily-digest mirror of the selected Chrome profile.",
-      );
-    }
-
-    context = await launchChrome(
-      launchConfig.userDataDir,
-      launchConfig.profileDirectory,
-    );
-
-    const page: Page = await context.newPage();
-    try {
-      console.log("Checking x...");
-      const xPosts = await crawlXFeed(page, cutoffMs);
-      console.log(`Collected ${xPosts.length} x posts.`);
-      posts.push(...xPosts);
-    } finally {
-      await page.close();
-    }
-  } finally {
-    if (context) {
-      await context.close();
-    }
-  }
+  console.log("Checking x via X API...");
+  const accessToken = await getValidXAccessToken(settings);
+  const posts = await fetchAndSaveXFeedSnapshot(accessToken, reportDate, cutoffMs);
+  console.log(`Collected ${posts.length} x posts.`);
 
   const reportPath = await writeMarkdownReport(settings, posts, now);
   console.log(`Report written to ${reportPath}`);
 
   if (isEmailEnabled(settings)) {
-    const reportDate = path.basename(reportPath, ".md");
-    await sendDigestReportEmail(settings, reportPath, reportDate);
+    const reportDateFromPath = path.basename(reportPath, ".md");
+    await sendDigestReportEmail(settings, reportPath, reportDateFromPath);
     console.log("Digest email sent.");
   }
 }
@@ -379,15 +272,26 @@ async function main(): Promise<void> {
       }
 
       break;
+    case "x":
+      if (subcommand === "auth") {
+        const settings = await loadSettings();
+        if (third === "login") {
+          await runXAuthLogin(settings);
+          return;
+        }
+        if (third === "status") {
+          await runXAuthStatus(settings);
+          return;
+        }
+        if (third === "logout") {
+          await runXAuthLogout(settings);
+          return;
+        }
+      }
+      break;
     case "run":
       await runCrawler();
       return;
-    case "browser":
-      if (subcommand === "profiles") {
-        await runBrowserProfiles();
-        return;
-      }
-      break;
     case "email":
       if (subcommand === "credentials") {
         if (third === "set") {
